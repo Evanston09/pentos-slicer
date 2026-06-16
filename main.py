@@ -20,7 +20,7 @@ server.scene.add_grid(
 
 plane_manager = PlaneManager(server)
 slicer = Slicer()
-current_mesh = None
+current_model: tuple[trimesh.Trimesh, str] | None = None
 
 upload = server.gui.add_upload_button(
     "Upload Model",
@@ -32,18 +32,18 @@ add_plane_button = server.gui.add_button("Add Plane", icon=viser.Icon.SQUARES_DI
 slice_button = server.gui.add_button("Slice", icon=viser.Icon.CLOUD_COMPUTING)
 
 
-def show_mesh(path: Path):
-    global current_mesh
+def show_mesh(path: Path) -> trimesh.Trimesh:
     server.scene.remove_by_name("/model")
 
     mesh = trimesh.load_mesh(path)
     mesh.visual = ColorVisuals(mesh, face_colors=[47, 153, 238, 255])
     server.scene.add_mesh_trimesh("/model", mesh)
-    current_mesh = mesh
+    return mesh
 
 
 @upload.on_upload
 def _(event):
+    global current_model
     uploaded = event.target.value
     upload_dir = Path("uploaded_models")
     upload_dir.mkdir(exist_ok=True)
@@ -53,7 +53,8 @@ def _(event):
 
     try:
         status.value = f"Loaded {uploaded.name}: "
-        show_mesh(path)
+        mesh = show_mesh(path)
+        current_model = (mesh, path.stem)
         print(status.value)
     except Exception as exc:
         status.value = f"Failed to load {uploaded.name}: {exc}"
@@ -67,7 +68,7 @@ def _(event):
 
 @slice_button.on_click
 def _(event):
-    if current_mesh is None:
+    if current_model is None:
         status.value = "Load a model before slicing"
         return
 
@@ -76,9 +77,9 @@ def _(event):
         return
 
     planes = plane_manager.get_all_planes()
-    paths = slicer.cut(current_mesh, planes)
-    slicer.slice_parts(paths)
-    status.value = f"Saved {len(paths)} sliced part(s) to {slicer.out_dir}"
+    mesh, source_name = current_model
+    output_path = slicer.slice(mesh, planes, source_name)
+    status.value = f"Saved merged G-code to {output_path}"
 
 
 print(f"Open your browser to http://localhost:{server.get_port()}")
