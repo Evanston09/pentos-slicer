@@ -36,7 +36,7 @@ def show_mesh(path: Path) -> trimesh.Trimesh:
     server.scene.remove_by_name("/model")
 
     mesh = trimesh.load_mesh(path)
-    mesh.visual = ColorVisuals(mesh, face_colors=[47, 153, 238, 255])
+    mesh.visual = ColorVisuals(mesh, face_colors=[47, 153, 238, 140])
     server.scene.add_mesh_trimesh("/model", mesh)
     return mesh
 
