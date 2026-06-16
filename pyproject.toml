@@ -1,0 +1,19 @@
+[project]
+name = "slicer"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "lxml>=6.1.1",
+    "rtree>=1.4.1",
+    "shapely>=2.1.2",
+    "triangle>=20250106",
+    "trimesh[recommend]>=4.12.2",
+    "viser>=1.0.30",
+]
+
+[dependency-groups]
+dev = [
+    "black>=26.5.1",
+]
