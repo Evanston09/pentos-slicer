@@ -109,8 +109,8 @@ class PlaneManager:
         with folder:
             position = self.server.gui.add_vector3(
                 "Position",
-                np.asarray(plane.position, dtype=float),
-                step=0.01,
+                plane.position,
+                step=0.001,
             )
             rotation_x = self.server.gui.add_number(
                 "Rotation X",

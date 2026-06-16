@@ -1,9 +1,9 @@
 import time
 from pathlib import Path
 
+import numpy as np
 import trimesh
 import viser
-from trimesh.visual.color import ColorVisuals
 
 from plane_manager import PlaneManager
 from slice_tools import Slicer
@@ -36,8 +36,14 @@ def show_mesh(path: Path) -> trimesh.Trimesh:
     server.scene.remove_by_name("/model")
 
     mesh = trimesh.load_mesh(path)
-    mesh.visual = ColorVisuals(mesh, face_colors=[47, 153, 238, 140])
-    server.scene.add_mesh_trimesh("/model", mesh)
+    server.scene.add_mesh_simple(
+        "/model",
+        vertices=np.asarray(mesh.vertices),
+        faces=np.asarray(mesh.faces),
+        color=(47, 153, 238),
+        opacity=0.45,
+        side="double",
+    )
     return mesh
 
 
