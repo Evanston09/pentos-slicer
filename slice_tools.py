@@ -1,4 +1,5 @@
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -6,46 +7,76 @@ import trimesh
 from viser import MeshHandle
 
 
+@dataclass
+class Chunk:
+    path: Path
+    base_normal: np.ndarray | None
+    z_offset: float
+
+
 class Slicer:
     def __init__(
-        self, out_dir: Path = Path("output"), temp_dir: Path = Path("temp")
+        self,
+        out_dir: Path = Path("output"),
+        temp_dir: Path = Path("temp"),
+        rotation_center: tuple[float, float, float] = (45, 45, 0)
     ) -> None:
         self.out_dir = out_dir
         self.temp_dir = temp_dir
+        self.rotation_center = np.asarray(rotation_center)
         self.out_dir.mkdir(exist_ok=True)
         self.temp_dir.mkdir(exist_ok=True)
 
     def slice(
-        self, mesh: trimesh.Trimesh, planes: list[MeshHandle], source_name: str = "model"
+        self,
+        mesh: trimesh.Trimesh,
+        planes: list[MeshHandle],
+        source_name: str = "model",
     ) -> Path:
         chunks = self.export_stl_chunks(mesh, planes, source_name)
         if not chunks:
             raise ValueError("No chunks were generated")
 
-        stl_paths, base_normals = map(list, zip(*chunks))
-        gcode_paths = self.run_prusa_slicer(stl_paths)
-        return self.merge_gcode_files(gcode_paths, base_normals, source_name)
+        gcode_paths = self.run_prusa_slicer(chunks)
+        return self.merge_gcode_files(gcode_paths, chunks, source_name)
 
     def run_prusa_slicer(
         self,
-        paths: list[Path],
+        chunks: list[Chunk],
         config_path: Path = Path("pentos_config.ini"),
         slicer_cmd: str = "prusa-slicer",
     ) -> list[Path]:
         gcode_paths = []
 
-        for path in paths:
-            gcode_path = path.with_suffix(".gcode")
+        for index, chunk in enumerate(chunks):
+            gcode_path = chunk.path.with_suffix(".gcode")
+            command = [
+                slicer_cmd,
+                "--export-gcode",
+                str(chunk.path),
+                "--load",
+                str(config_path),
+                "--dont-arrange",
+                "--output",
+                str(gcode_path),
+            ]
+
+            if index > 0:
+                command.extend(
+                    [
+                        "--skirts",
+                        "0",
+                        "--skirt-height",
+                        "0",
+                        "--min-skirt-length",
+                        "0",
+                        "--brim-type",
+                        "no_brim",
+                    ]
+                )
+
             subprocess.run(
-                [
-                    slicer_cmd,
-                    "--export-gcode",
-                    str(path),
-                    "--load",
-                    str(config_path),
-                    "--output",
-                    str(gcode_path),
-                ],
+                command,
                 check=True,
             )
             gcode_paths.append(gcode_path)
@@ -55,59 +86,66 @@ class Slicer:
     def merge_gcode_files(
         self,
         gcode_paths: list[Path],
-        base_normals: list[np.ndarray | None],
+        chunks: list[Chunk],
         source_name: str,
     ) -> Path:
         final_gcode = []
 
         for index, gcode_path in enumerate(gcode_paths):
             lines = gcode_path.read_text().splitlines(keepends=True)
-
-            if len(gcode_paths) == 1:
-                pass
-            elif index == 0:
-                lines = self._remove_end(lines)
-            elif index == len(gcode_paths) - 1:
-                lines = self._remove_start(lines)
-            else:
-                lines = self._remove_start(self._remove_end(lines))
-
+            lines = self._trim_gcode(lines, index, len(gcode_paths))
+            lines = self._offset_absolute_z(lines, chunks[index].z_offset)
             final_gcode.extend(lines)
 
             if index < len(gcode_paths) - 1:
-                final_gcode.extend(self._ab_transition(base_normals[index + 1]))
+                final_gcode.extend(self._ab_transition(chunks[index + 1].base_normal))
 
         output_path = self.out_dir / f"{source_name}.gcode"
         output_path.write_text("".join(final_gcode))
         return output_path
 
+    def _trim_gcode(
+        self,
+        lines: list[str],
+        index: int,
+        total: int,
+    ) -> list[str]:
+        if total == 1:
+            return lines
+        if index == 0:
+            return self._remove_end(lines)
+        if index == total - 1:
+            return self._remove_start(lines)
+        return self._remove_start(self._remove_end(lines))
+
     @staticmethod
     def _remove_end(lines: list[str]) -> list[str]:
-        end_start = max(
+        custom_blocks = [
             i for i, line in enumerate(lines) if line.strip() == ";TYPE:Custom"
-        )
-        return lines[:end_start]
+        ]
+        return lines[: custom_blocks[-1]] if custom_blocks else lines
 
     @staticmethod
     def _remove_start(lines: list[str]) -> list[str]:
         start = next(
-            i for i, line in enumerate(lines) if line.strip() == ";LAYER_CHANGE"
+            (i for i, line in enumerate(lines) if line.strip() == ";LAYER_CHANGE"),
+            0,
         )
-
         return lines[start:]
 
     def export_stl_chunks(
         self, mesh: trimesh.Trimesh, planes: list[MeshHandle], source_name: str
-    ) -> list[tuple[Path, np.ndarray | None]]:
+    ) -> list[Chunk]:
         pieces = [(mesh, None)]
 
         for plane in planes:
-            next_pieces = []
+            plane_position = plane.position
             normal = self._plane_normal(plane)
+            next_pieces = []
 
             for piece, base_normal in pieces:
-                part_a = piece.slice_plane(plane.position, normal, cap=True)
-                part_b = piece.slice_plane(plane.position, -normal, cap=True)
+                part_a = piece.slice_plane(plane_position, normal, cap=True)
+                part_b = piece.slice_plane(plane_position, -normal, cap=True)
 
                 if self._is_valid(part_a):
                     next_pieces.append((part_a, -normal))
@@ -119,14 +157,9 @@ class Slicer:
         chunks = []
         for index, (piece, base_normal) in enumerate(pieces):
             path = self.temp_dir / f"{source_name}_{mesh.identifier_hash}_{index}.stl"
-            if base_normal is not None:
-                piece = self._orient_base_to_bed(piece, base_normal)
-
-            if piece.extents.max() < 1.0:
-                piece.units = "m"
-                piece.convert_units("mm")
+            piece, z_offset = self._orient(piece, base_normal)
             piece.export(path)
-            chunks.append((path, base_normal))
+            chunks.append(Chunk(path=path, base_normal=base_normal, z_offset=z_offset))
 
         return chunks
 
@@ -137,20 +170,59 @@ class Slicer:
         normal = rotation_matrix @ np.array([0.0, 0.0, 1.0])
         return normal
 
-    @staticmethod
-    def _orient_base_to_bed(
-        mesh: trimesh.Trimesh, base_normal: np.ndarray
-    ) -> trimesh.Trimesh:
-        transform = trimesh.geometry.align_vectors(base_normal, [0, 0, -1])
-        mesh.apply_transform(transform)
+    def _orient(
+        self, mesh: trimesh.Trimesh, base_normal: np.ndarray | None
+    ) -> tuple[trimesh.Trimesh, float]:
+        mesh = mesh.copy()
+        if base_normal is not None:
+            transform = trimesh.geometry.align_vectors(base_normal, [0, 0, -1])
+            transform = trimesh.transformations.transform_around(
+                transform,
+                self.rotation_center,
+            )
+            mesh.apply_transform(transform)
 
-        # Prevent floating
-        mesh.apply_translation([0, 0, -mesh.bounds[0][2]])
-        return mesh
+        z_offset = float(mesh.bounds[0][2])
+        mesh.apply_translation([0, 0, -z_offset])
+        return mesh, z_offset
 
     @staticmethod
     def _is_valid(mesh: trimesh.Trimesh | None) -> bool:
         return mesh is not None and len(mesh.vertices) > 0 and len(mesh.faces) > 0
+
+    @staticmethod
+    def _offset_absolute_z(lines: list[str], z_offset: float) -> list[str]:
+        absolute_xyz = True
+        offset_lines = []
+
+        for line in lines:
+            newline = "\n" if line.endswith("\n") else ""
+            content = line[:-1] if newline else line
+            command_part, separator, comment = content.partition(";")
+            tokens = command_part.split()
+
+            if not tokens:
+                offset_lines.append(line)
+                continue
+
+            command = tokens[0].upper()
+            if command == "G90":
+                absolute_xyz = True
+            elif command == "G91":
+                absolute_xyz = False
+            elif absolute_xyz and command in {"G0", "G00", "G1", "G01"}:
+                for token_index, token in enumerate(tokens[1:], start=1):
+                    if token[:1].upper() == "Z":
+                        z = float(token[1:]) + z_offset
+                        tokens[token_index] = f"Z{z:.3f}".rstrip("0").rstrip(".")
+                        break
+
+            rebuilt = " ".join(tokens)
+            if separator:
+                rebuilt = f"{rebuilt} {separator}{comment}" if rebuilt else content
+            offset_lines.append(f"{rebuilt}{newline}")
+
+        return offset_lines
 
     def _ab_transition(self, base_normal: np.ndarray | None) -> list[str]:
         if base_normal is None:
