@@ -13,7 +13,7 @@ class PlaneManager:
         self.planes = {}
         self.selected_plane_id = None
         self.updating_gui_from_scene = False
-        self.plane_half_size = 0.05
+        self.plane_half_size = 50
         self.arrow_length = self.plane_half_size
 
     def add_plane(self, mesh=None):

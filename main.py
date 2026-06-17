@@ -9,14 +9,58 @@ from plane_manager import PlaneManager
 from slice_tools import Slicer
 
 BLUE = [47, 153, 238, 255]
+BUILD_PLATE_SIZE = 90.0
+BUILD_PLATE_CENTER = np.array([BUILD_PLATE_SIZE / 2, BUILD_PLATE_SIZE / 2, 0.0])
+BUILD_PLATE_COLOR = (45, 45, 45)
+BUILD_PLATE_EDGE_COLOR = np.array([255, 130, 0])
+
+
+def add_build_plate():
+    size = BUILD_PLATE_SIZE
+    vertices = np.array(
+        [
+            [0.0, 0.0, -.02],
+            [size, 0.0, -.02],
+            [size, size, -.02],
+            [0.0, size, -.02],
+        ],
+        dtype=float,
+    )
+    faces = np.array([[0, 1, 2], [0, 2, 3]])
+    server.scene.add_mesh_simple(
+        "/build_plate/surface",
+        vertices=vertices,
+        faces=faces,
+        color=BUILD_PLATE_COLOR,
+        opacity=0.18,
+        side="double",
+    )
+
+    server.scene.add_line_segments(
+        "/build_plate/outline",
+        points=np.array(
+            [
+                [[0.0, 0.0, 0.0], [size, 0.0, 0.0]],
+                [[size, 0.0, 0.0], [size, size, 0.0]],
+                [[size, size, 0.0], [0.0, size, 0.0]],
+                [[0.0, size, 0.0], [0.0, 0.0, 0.0]],
+            ],
+        ),
+        colors=BUILD_PLATE_EDGE_COLOR,
+        line_width=2.0,
+    )
 
 
 server = viser.ViserServer()
 server.scene.add_grid(
     "/world/grid",
-    width=100,
-    height=100,
+    width=BUILD_PLATE_SIZE,
+    height=BUILD_PLATE_SIZE,
+    cell_size=5.0,
+    section_size=10.0,
+    position=BUILD_PLATE_CENTER,
 )
+add_build_plate()
 
 plane_manager = PlaneManager(server)
 slicer = Slicer()
@@ -36,6 +80,19 @@ def show_mesh(path: Path) -> trimesh.Trimesh:
     server.scene.remove_by_name("/model")
 
     mesh = trimesh.load_mesh(path)
+    if mesh.units is not None and mesh.units != "mm":
+        mesh.convert_units("mm")
+
+    lower, upper = mesh.bounds
+    mesh_center_xy = (lower[:2] + upper[:2]) / 2.0
+    mesh.apply_translation(
+        [
+            BUILD_PLATE_CENTER[0] - mesh_center_xy[0],
+            BUILD_PLATE_CENTER[1] - mesh_center_xy[1],
+            -lower[2],
+        ]
+    )
+
     server.scene.add_mesh_simple(
         "/model",
         vertices=np.asarray(mesh.vertices),
@@ -68,12 +125,12 @@ def _(event):
 
 
 @add_plane_button.on_click
-def _(event):
+def _(_):
     plane_manager.add_plane()
 
 
 @slice_button.on_click
-def _(event):
+def _(_):
     if current_model is None:
         status.value = "Load a model before slicing"
         return
