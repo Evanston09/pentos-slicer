@@ -6,6 +6,7 @@ from typing import Protocol
 import numpy as np
 import trimesh
 
+import gcode_tools
 from machine import BUILD_PLATE_CENTER
 
 
@@ -19,6 +20,8 @@ class Chunk:
     path: Path
     base_normal: np.ndarray | None
     z_offset: float
+    a_degrees: float
+    b_degrees: float
 
 
 class Slicer:
@@ -93,49 +96,8 @@ class Slicer:
         chunks: list[Chunk],
         source_name: str,
     ) -> Path:
-        final_gcode = []
-
-        for index, gcode_path in enumerate(gcode_paths):
-            lines = gcode_path.read_text().splitlines(keepends=True)
-            lines = self._trim_gcode(lines, index, len(gcode_paths))
-            lines = self._offset_absolute_z(lines, chunks[index].z_offset)
-            final_gcode.extend(lines)
-
-            if index < len(gcode_paths) - 1:
-                final_gcode.extend(self._ab_transition(chunks[index + 1].base_normal))
-
         output_path = self.out_dir / f"{source_name}.gcode"
-        output_path.write_text("".join(final_gcode))
-        return output_path
-
-    def _trim_gcode(
-        self,
-        lines: list[str],
-        index: int,
-        total: int,
-    ) -> list[str]:
-        if total == 1:
-            return lines
-        if index == 0:
-            return self._remove_end(lines)
-        if index == total - 1:
-            return self._remove_start(lines)
-        return self._remove_start(self._remove_end(lines))
-
-    @staticmethod
-    def _remove_end(lines: list[str]) -> list[str]:
-        custom_blocks = [
-            i for i, line in enumerate(lines) if line.strip() == ";TYPE:Custom"
-        ]
-        return lines[: custom_blocks[-1]] if custom_blocks else lines
-
-    @staticmethod
-    def _remove_start(lines: list[str]) -> list[str]:
-        start = next(
-            (i for i, line in enumerate(lines) if line.strip() == ";LAYER_CHANGE"),
-            0,
-        )
-        return lines[start:]
+        return gcode_tools.merge_gcode_files(gcode_paths, chunks, output_path)
 
     def export_stl_chunks(
         self, mesh: trimesh.Trimesh, planes: list[SlicePlane], source_name: str
@@ -151,19 +113,27 @@ class Slicer:
                 part_a = piece.slice_plane(plane_position, normal, cap=True)
                 part_b = piece.slice_plane(plane_position, -normal, cap=True)
 
-                if self._is_valid(part_a):
-                    next_pieces.append((part_a, -normal))
                 if self._is_valid(part_b):
                     next_pieces.append((part_b, base_normal))
+                if self._is_valid(part_a):
+                    next_pieces.append((part_a, -normal))
 
             pieces = next_pieces
 
         chunks = []
         for index, (piece, base_normal) in enumerate(pieces):
             path = self.temp_dir / f"{source_name}_{mesh.identifier_hash}_{index}.stl"
-            piece, z_offset = self._orient(piece, base_normal)
+            piece, z_offset, a_degrees, b_degrees = self._orient(piece, base_normal)
             piece.export(path)
-            chunks.append(Chunk(path=path, base_normal=base_normal, z_offset=z_offset))
+            chunks.append(
+                Chunk(
+                    path=path,
+                    base_normal=base_normal,
+                    z_offset=z_offset,
+                    a_degrees=a_degrees,
+                    b_degrees=b_degrees,
+                )
+            )
 
         return chunks
 
@@ -176,9 +146,12 @@ class Slicer:
 
     def _orient(
         self, mesh: trimesh.Trimesh, base_normal: np.ndarray | None
-    ) -> tuple[trimesh.Trimesh, float]:
+    ) -> tuple[trimesh.Trimesh, float, float, float]:
+        a_degrees, b_degrees = self.ab_angles(base_normal)
+
         if base_normal is not None:
-            transform = trimesh.geometry.align_vectors(base_normal, [0, 0, -1])
+            transform = np.eye(4)
+            transform[:3, :3] = self.rotation_matrix(a_degrees, b_degrees).T
             transform = trimesh.transformations.transform_around(
                 transform,
                 self.rotation_center,
@@ -187,65 +160,52 @@ class Slicer:
 
         z_offset = float(mesh.bounds[0][2])
         mesh.apply_translation([0, 0, -z_offset])
-        return mesh, z_offset
+        return mesh, z_offset, a_degrees, b_degrees
 
     @staticmethod
     def _is_valid(mesh: trimesh.Trimesh | None) -> bool:
         return mesh is not None and len(mesh.vertices) > 0 and len(mesh.faces) > 0
 
     @staticmethod
-    def _offset_absolute_z(lines: list[str], z_offset: float) -> list[str]:
-        absolute_xyz = True
-        offset_lines = []
+    def rotation_matrix(a_degrees: float, b_degrees: float) -> np.ndarray:
+        a = np.radians(a_degrees)
+        b = np.radians(b_degrees)
 
-        for line in lines:
-            newline = "\n" if line.endswith("\n") else ""
-            content = line[:-1] if newline else line
-            command_part, separator, comment = content.partition(";")
-            tokens = command_part.split()
+        tilt = np.array(
+            [
+                [np.cos(a), 0.0, np.sin(a)],
+                [0.0, 1.0, 0.0],
+                [-np.sin(a), 0.0, np.cos(a)],
+            ],
+        )
+        twist = np.array(
+            [
+                [np.cos(b), -np.sin(b), 0.0],
+                [np.sin(b), np.cos(b), 0.0],
+                [0.0, 0.0, 1.0],
+            ],
+        )
+        return twist @ tilt
 
-            if not tokens:
-                offset_lines.append(line)
-                continue
-
-            command = tokens[0].upper()
-            if command == "G90":
-                absolute_xyz = True
-            elif command == "G91":
-                absolute_xyz = False
-            elif absolute_xyz and command in {"G0", "G00", "G1", "G01"}:
-                for token_index, token in enumerate(tokens[1:], start=1):
-                    if token[:1].upper() == "Z":
-                        z = float(token[1:]) + z_offset
-                        tokens[token_index] = f"Z{z:.3f}".rstrip("0").rstrip(".")
-                        break
-
-            rebuilt = " ".join(tokens)
-            if separator:
-                rebuilt = f"{rebuilt} {separator}{comment}" if rebuilt else content
-            offset_lines.append(f"{rebuilt}{newline}")
-
-        return offset_lines
-
-    def _ab_transition(self, base_normal: np.ndarray | None) -> list[str]:
+    @staticmethod
+    def ab_angles(base_normal: np.ndarray | None) -> tuple[float, float]:
         if base_normal is None:
-            a = 0.0
-            b = 0.0
-        else:
-            normal = -base_normal
-            normal = normal / np.linalg.norm(normal)
-            nx, ny, nz = normal
+            return 0.0, 0.0
 
-            b = np.degrees(np.arctan2(ny, nx))
-            a = np.degrees(np.arccos(np.clip(nz, -1.0, 1.0)))
+        normal = -base_normal
+        norm = np.linalg.norm(normal)
+        if np.isclose(norm, 0.0):
+            raise ValueError("base_normal must be non-zero")
+        normal = normal / norm
+        nx, ny, nz = normal
 
-        return [
-            "\n; --- PENTOS A/B TRANSITION ---\n",
-            "G1 E-5 F3600\n",
-            "G91 ; relative movement for safe lift\n",
-            "G1 Z10 F3000\n",
-            "G90 ; absolute movement\n",
-            f"G1 A{a:.3f} B{b:.3f} F1200\n",
-            "G92 E0\n",
-            "; --- END PENTOS A/B TRANSITION ---\n",
-        ]
+        horizontal = np.hypot(nx, ny)
+        if np.isclose(horizontal, 0.0):
+            return (0.0 if nz >= 0.0 else 180.0), 0.0
+
+        a = np.degrees(np.arctan2(horizontal, nz))
+        b = np.degrees(np.arctan2(ny, nx))
+
+        b = ((b + 180.0) % 360.0) - 180.0
+
+        return a, b

@@ -267,14 +267,17 @@ class PlaneManager:
     def _normalize_quaternion(wxyz) -> np.ndarray:
         wxyz = np.array(wxyz, dtype=float)
         norm = np.linalg.norm(wxyz)
-        if norm == 0:
+        if np.isclose(norm, 0.0):
             return neutral_wxyz()
         return wxyz / norm
 
     @staticmethod
     def _is_neutral_wxyz(wxyz) -> bool:
         wxyz = np.array(wxyz, dtype=float)
-        return bool(np.linalg.norm(wxyz[1:]) < 1e-6 and abs(abs(wxyz[0]) - 1.0) < 1e-6)
+        return bool(
+            np.isclose(np.linalg.norm(wxyz[1:]), 0.0)
+            and np.isclose(abs(wxyz[0]), 1.0)
+        )
 
     @staticmethod
     def _euler_degrees(wxyz):
