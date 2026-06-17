@@ -1,0 +1,4 @@
+import numpy as np
+
+BUILD_PLATE_SIZE = 90.0
+BUILD_PLATE_CENTER = np.array([BUILD_PLATE_SIZE / 2.0, BUILD_PLATE_SIZE / 2.0, 0.0])

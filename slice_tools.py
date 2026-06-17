@@ -1,10 +1,17 @@
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 import numpy as np
 import trimesh
-from viser import MeshHandle
+
+from machine import BUILD_PLATE_CENTER
+
+
+class SlicePlane(Protocol):
+    position: np.ndarray
+    wxyz: np.ndarray
 
 
 @dataclass
@@ -19,18 +26,18 @@ class Slicer:
         self,
         out_dir: Path = Path("output"),
         temp_dir: Path = Path("temp"),
-        rotation_center: tuple[float, float, float] = (45, 45, 0)
+        rotation_center: np.ndarray | tuple[float, float, float] = BUILD_PLATE_CENTER,
     ) -> None:
         self.out_dir = out_dir
         self.temp_dir = temp_dir
-        self.rotation_center = np.asarray(rotation_center)
+        self.rotation_center = np.array(rotation_center)
         self.out_dir.mkdir(exist_ok=True)
         self.temp_dir.mkdir(exist_ok=True)
 
     def slice(
         self,
         mesh: trimesh.Trimesh,
-        planes: list[MeshHandle],
+        planes: list[SlicePlane],
         source_name: str = "model",
     ) -> Path:
         chunks = self.export_stl_chunks(mesh, planes, source_name)
@@ -75,10 +82,7 @@ class Slicer:
                     ]
                 )
 
-            subprocess.run(
-                command,
-                check=True,
-            )
+            subprocess.run(command, check=True)
             gcode_paths.append(gcode_path)
 
         return gcode_paths
@@ -134,7 +138,7 @@ class Slicer:
         return lines[start:]
 
     def export_stl_chunks(
-        self, mesh: trimesh.Trimesh, planes: list[MeshHandle], source_name: str
+        self, mesh: trimesh.Trimesh, planes: list[SlicePlane], source_name: str
     ) -> list[Chunk]:
         pieces = [(mesh, None)]
 
@@ -164,7 +168,7 @@ class Slicer:
         return chunks
 
     @staticmethod
-    def _plane_normal(plane: MeshHandle) -> np.ndarray:
+    def _plane_normal(plane: SlicePlane) -> np.ndarray:
         # Only care about rotation and we start pointing up
         rotation_matrix = trimesh.transformations.quaternion_matrix(plane.wxyz)[:3, :3]
         normal = rotation_matrix @ np.array([0.0, 0.0, 1.0])
@@ -173,7 +177,6 @@ class Slicer:
     def _orient(
         self, mesh: trimesh.Trimesh, base_normal: np.ndarray | None
     ) -> tuple[trimesh.Trimesh, float]:
-        mesh = mesh.copy()
         if base_normal is not None:
             transform = trimesh.geometry.align_vectors(base_normal, [0, 0, -1])
             transform = trimesh.transformations.transform_around(

@@ -5,26 +5,24 @@ import numpy as np
 import trimesh
 import viser
 
+from machine import BUILD_PLATE_CENTER, BUILD_PLATE_SIZE
 from plane_manager import PlaneManager
 from slice_tools import Slicer
 
-BLUE = [47, 153, 238, 255]
-BUILD_PLATE_SIZE = 90.0
-BUILD_PLATE_CENTER = np.array([BUILD_PLATE_SIZE / 2, BUILD_PLATE_SIZE / 2, 0.0])
 BUILD_PLATE_COLOR = (45, 45, 45)
 BUILD_PLATE_EDGE_COLOR = np.array([255, 130, 0])
+MODEL_COLOR = (47, 153, 238)
 
 
-def add_build_plate():
+def add_build_plate(server: viser.ViserServer) -> None:
     size = BUILD_PLATE_SIZE
     vertices = np.array(
         [
-            [0.0, 0.0, -.02],
-            [size, 0.0, -.02],
-            [size, size, -.02],
-            [0.0, size, -.02],
+            [0.0, 0.0, -0.02],
+            [size, 0.0, -0.02],
+            [size, size, -0.02],
+            [0.0, size, -0.02],
         ],
-        dtype=float,
     )
     faces = np.array([[0, 1, 2], [0, 2, 3]])
     server.scene.add_mesh_simple(
@@ -60,7 +58,7 @@ server.scene.add_grid(
     section_size=10.0,
     position=BUILD_PLATE_CENTER,
 )
-add_build_plate()
+add_build_plate(server)
 
 plane_manager = PlaneManager(server)
 slicer = Slicer()
@@ -76,12 +74,19 @@ add_plane_button = server.gui.add_button("Add Plane", icon=viser.Icon.SQUARES_DI
 slice_button = server.gui.add_button("Slice", icon=viser.Icon.CLOUD_COMPUTING)
 
 
+def normalize_mesh_units(mesh: trimesh.Trimesh) -> None:
+    if mesh.units is None:
+        mesh.units = "m" if float(mesh.extents.max()) < 1.0 else "mm"
+
+    if mesh.units != "mm":
+        mesh.convert_units("mm")
+
+
 def show_mesh(path: Path) -> trimesh.Trimesh:
     server.scene.remove_by_name("/model")
 
     mesh = trimesh.load_mesh(path)
-    if mesh.units is not None and mesh.units != "mm":
-        mesh.convert_units("mm")
+    normalize_mesh_units(mesh)
 
     lower, upper = mesh.bounds
     mesh_center_xy = (lower[:2] + upper[:2]) / 2.0
@@ -97,7 +102,7 @@ def show_mesh(path: Path) -> trimesh.Trimesh:
         "/model",
         vertices=np.asarray(mesh.vertices),
         faces=np.asarray(mesh.faces),
-        color=(47, 153, 238),
+        color=MODEL_COLOR,
         opacity=0.45,
         side="double",
     )
