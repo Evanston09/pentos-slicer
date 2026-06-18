@@ -28,17 +28,17 @@ class PlaneState:
     normal: Any
     anchor: Any
     gizmo: Any
-    gui: dict[str, Any] | None = None
+    gui: dict[str, Any]
     start_position: np.ndarray | None = None
     start_wxyz: np.ndarray | None = None
 
 
 class PlaneManager:
-    def __init__(self, server: ViserServer):
+    def __init__(self, server: ViserServer, gui_container: Any):
         self.server = server
+        self.gui_container = gui_container
         self.next_id = 0
         self.planes: dict[int, PlaneState] = {}
-        self.selected_plane_id: int | None = None
         self.synching_gui = False
 
     def add_plane(self) -> int:
@@ -83,73 +83,41 @@ class PlaneManager:
             head_length=half * 0.1,
         )
 
-        self.planes[plane_id] = PlaneState(
-            pose=pose,
-            mesh=mesh,
-            normal=normal,
-            anchor=anchor,
-            gizmo=gizmo,
-        )
+        rx, ry, rz = self._euler_degrees(pose.wxyz)
 
-        @gizmo.on_update
-        async def _(event):
-            self._on_gizmo_update(plane_id, event)
-
-        @mesh.on_click
-        def _(_):
-            self.select_plane(plane_id)
-
-        self.select_plane(plane_id)
-        return plane_id
-
-    def remove_plane(self, plane_id: int) -> None:
-        del_state = self.planes.pop(plane_id, None)
-        if del_state is None:
-            return
-
-        self._remove_gui(del_state)
-        del_state.gizmo.remove()
-        del_state.anchor.remove()
-        del_state.normal.remove()
-        del_state.mesh.remove()
-        del_state.pose.remove()
-
-        if self.selected_plane_id == plane_id:
-            self.selected_plane_id = None
-
-    def get_all_planes(self) -> list[Any]:
-        return [state.pose for state in self.planes.values()]
-
-    def select_plane(self, plane_id: int) -> None:
-        if plane_id not in self.planes:
-            return
-
-        if self.selected_plane_id is not None:
-            self._remove_gui(self.planes[self.selected_plane_id])
-
-        self.selected_plane_id = plane_id
-
-        state = self.planes[plane_id]
-        rx, ry, rz = self._euler_degrees(state.pose.wxyz)
-
-        folder = self.server.gui.add_folder(f"Plane {plane_id}", expand_by_default=True)
+        with self.gui_container:
+            folder = self.server.gui.add_folder(
+                f"Plane {plane_id}",
+                expand_by_default=True,
+            )
         with folder:
             position = self.server.gui.add_vector3(
-                "Position", state.pose.position, step=0.001
+                "Position", pose.position, step=0.001
             )
             rotation_x = self.server.gui.add_number("Rotation X", rx, step=1.0)
             rotation_y = self.server.gui.add_number("Rotation Y", ry, step=1.0)
             rotation_z = self.server.gui.add_number("Rotation Z", rz, step=1.0)
             delete_button = self.server.gui.add_button("Delete Plane")
 
-        state.gui = {
-            "folder": folder,
-            "position": position,
-            "rotation_x": rotation_x,
-            "rotation_y": rotation_y,
-            "rotation_z": rotation_z,
-            "delete_button": delete_button,
-        }
+        self.planes[plane_id] = PlaneState(
+            pose=pose,
+            mesh=mesh,
+            normal=normal,
+            anchor=anchor,
+            gizmo=gizmo,
+            gui={
+                "folder": folder,
+                "position": position,
+                "rotation_x": rotation_x,
+                "rotation_y": rotation_y,
+                "rotation_z": rotation_z,
+                "delete_button": delete_button,
+            },
+        )
+
+        @gizmo.on_update
+        async def _(event):
+            self._on_gizmo_update(plane_id, event)
 
         @position.on_update
         def _(_):
@@ -188,6 +156,23 @@ class PlaneManager:
         def _(_):
             self.remove_plane(plane_id)
 
+        return plane_id
+
+    def remove_plane(self, plane_id: int) -> None:
+        del_state = self.planes.pop(plane_id, None)
+        if del_state is None:
+            return
+
+        self._remove_gui(del_state)
+        del_state.gizmo.remove()
+        del_state.anchor.remove()
+        del_state.normal.remove()
+        del_state.mesh.remove()
+        del_state.pose.remove()
+
+    def get_all_planes(self) -> list[Any]:
+        return [state.pose for state in self.planes.values()]
+
     def _set_plane_pose(
         self,
         plane_id: int,
@@ -209,9 +194,6 @@ class PlaneManager:
         if state is None:
             return
 
-        if self.selected_plane_id != plane_id:
-            self.select_plane(plane_id)
-
         if event.phase == "start":
             state.start_position = np.array(state.pose.position)
             state.start_wxyz = self._normalize_quaternion(state.pose.wxyz)
@@ -219,7 +201,7 @@ class PlaneManager:
 
         position_delta = np.array(state.gizmo.position)
         rotation_delta = self._normalize_quaternion(state.gizmo.wxyz)
-        
+
         if not self._is_neutral_wxyz(rotation_delta):
             state.pose.wxyz = self._normalize_quaternion(
                 tf.quaternion_multiply(rotation_delta, state.start_wxyz)
@@ -244,24 +226,21 @@ class PlaneManager:
         state = self.planes.get(plane_id)
         if state is None:
             return
-        if self.selected_plane_id == plane_id and state.gui is not None:
-            self.synching_gui = True
-            try:
-                rx, ry, rz = self._euler_degrees(state.pose.wxyz)
-                state.gui["position"].value = state.pose.position
-                state.gui["rotation_x"].value = rx
-                state.gui["rotation_y"].value = ry
-                state.gui["rotation_z"].value = rz
-            finally:
-                self.synching_gui = False
+        self.synching_gui = True
+        try:
+            rx, ry, rz = self._euler_degrees(state.pose.wxyz)
+            state.gui["position"].value = state.pose.position
+            state.gui["rotation_x"].value = rx
+            state.gui["rotation_y"].value = ry
+            state.gui["rotation_z"].value = rz
+        finally:
+            self.synching_gui = False
 
     @staticmethod
     def _remove_gui(state: PlaneState):
-        if state.gui is None:
-            return
         for handle in reversed(state.gui.values()):
             handle.remove()
-        state.gui = None
+        state.gui.clear()
 
     @staticmethod
     def _normalize_quaternion(wxyz) -> np.ndarray:
@@ -275,8 +254,7 @@ class PlaneManager:
     def _is_neutral_wxyz(wxyz) -> bool:
         wxyz = np.array(wxyz, dtype=float)
         return bool(
-            np.isclose(np.linalg.norm(wxyz[1:]), 0.0)
-            and np.isclose(abs(wxyz[0]), 1.0)
+            np.isclose(np.linalg.norm(wxyz[1:]), 0.0) and np.isclose(abs(wxyz[0]), 1.0)
         )
 
     @staticmethod

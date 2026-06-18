@@ -49,7 +49,7 @@ def add_build_plate(server: viser.ViserServer) -> None:
     )
 
 
-server = viser.ViserServer()
+server = viser.ViserServer(label="Pentos")
 server.scene.add_grid(
     "/world/grid",
     width=BUILD_PLATE_SIZE,
@@ -60,7 +60,6 @@ server.scene.add_grid(
 )
 add_build_plate(server)
 
-plane_manager = PlaneManager(server)
 slicer = Slicer()
 current_model: tuple[trimesh.Trimesh, str] | None = None
 
@@ -70,7 +69,13 @@ upload = server.gui.add_upload_button(
 )
 status = server.gui.add_text("Status", "No model loaded", disabled=True)
 
-add_plane_button = server.gui.add_button("Add Plane", icon=viser.Icon.SQUARES_DIAGONAL)
+planes_folder = server.gui.add_folder("Planes", expand_by_default=True)
+plane_manager = PlaneManager(server, gui_container=planes_folder)
+with planes_folder:
+    add_plane_button = server.gui.add_button(
+        "Add Plane",
+        icon=viser.Icon.SQUARES_DIAGONAL,
+    )
 slice_button = server.gui.add_button("Slice", icon=viser.Icon.CLOUD_COMPUTING)
 
 
