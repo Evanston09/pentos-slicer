@@ -5,8 +5,7 @@ import numpy as np
 from trimesh import transformations as tf
 from viser import ViserServer
 
-ORANGE = (255, 130, 0)
-ARROW_BLUE = (47, 153, 238)
+from theming import PENTOS_BLUE, PENTOS_ORANGE
 
 PLANE_HALF_SIZE = 50.0
 GIZMO_SCALE = 0.45
@@ -70,14 +69,14 @@ class PlaneManager:
                 ]
             ),
             faces=np.array([[0, 1, 2], [0, 2, 3]]),
-            color=ORANGE,
+            color=PENTOS_ORANGE,
             opacity=0.35,
             side="double",
         )
         normal = self.server.scene.add_arrows(
             f"/planes/{plane_id}/pose/normal",
             points=np.array([[[0.0, 0.0, 0.0], [0.0, 0.0, half * GIZMO_SCALE]]]),
-            colors=ARROW_BLUE,
+            colors=PENTOS_BLUE,
             shaft_radius=half * 0.012,
             head_radius=half * 0.04,
             head_length=half * 0.1,

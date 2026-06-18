@@ -8,10 +8,12 @@ import viser
 from machine import BUILD_PLATE_CENTER, BUILD_PLATE_SIZE
 from plane_manager import PlaneManager
 from slice_tools import Slicer
-
-BUILD_PLATE_COLOR = (45, 45, 45)
-BUILD_PLATE_EDGE_COLOR = np.array([255, 130, 0])
-MODEL_COLOR = (47, 153, 238)
+from theming import (
+    BUILD_PLATE_COLOR,
+    PENTOS_BLUE,
+    PENTOS_ORANGE,
+    configure_theme,
+)
 
 
 def add_build_plate(server: viser.ViserServer) -> None:
@@ -44,12 +46,13 @@ def add_build_plate(server: viser.ViserServer) -> None:
                 [[0.0, size, 0.0], [0.0, 0.0, 0.0]],
             ],
         ),
-        colors=BUILD_PLATE_EDGE_COLOR,
+        colors=np.array(PENTOS_ORANGE),
         line_width=2.0,
     )
 
 
 server = viser.ViserServer(label="Pentos")
+configure_theme(server)
 server.scene.add_grid(
     "/world/grid",
     width=BUILD_PLATE_SIZE,
@@ -107,7 +110,7 @@ def show_mesh(path: Path) -> trimesh.Trimesh:
         "/model",
         vertices=np.asarray(mesh.vertices),
         faces=np.asarray(mesh.faces),
-        color=MODEL_COLOR,
+        color=PENTOS_BLUE,
         opacity=0.45,
         side="double",
     )
