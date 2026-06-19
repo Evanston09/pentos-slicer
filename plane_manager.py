@@ -32,26 +32,45 @@ class PlaneState:
     start_wxyz: np.ndarray | None = None
 
 
+@dataclass
+class PlaneSnapshot:
+    position: np.ndarray
+    wxyz: np.ndarray
+
+
 class PlaneManager:
-    def __init__(self, server: ViserServer, gui_container: Any):
+    def __init__(
+        self,
+        server: ViserServer,
+        gui_container: Any | None = None,
+        scene_prefix: str = "/planes",
+    ):
         self.server = server
         self.gui_container = gui_container
+        self.scene_prefix = scene_prefix
         self.next_id = 0
         self.planes: dict[int, PlaneState] = {}
         self.synching_gui = False
 
-    def add_plane(self) -> int:
+    def add_plane(
+        self,
+        position: np.ndarray | None = None,
+        wxyz: np.ndarray | None = None,
+    ) -> int:
         plane_id = self.next_id
         self.next_id += 1
 
         pose = self.server.scene.add_frame(
-            f"/planes/{plane_id}/pose",
+            f"{self.scene_prefix}/{plane_id}/pose",
+            position=neutral_position() if position is None else position,
+            wxyz=neutral_wxyz() if wxyz is None else self._normalize_quaternion(wxyz),
         )
         anchor = self.server.scene.add_frame(
-            f"/planes/{plane_id}/gizmo_anchor",
+            f"{self.scene_prefix}/{plane_id}/gizmo_anchor",
+            position=pose.position,
         )
         gizmo = self.server.scene.add_transform_controls(
-            f"/planes/{plane_id}/gizmo_anchor/controls",
+            f"{self.scene_prefix}/{plane_id}/gizmo_anchor/controls",
             scale=PLANE_HALF_SIZE * GIZMO_SCALE,
             line_width=GIZMO_LINE_WIDTH,
             depth_test=False,
@@ -59,7 +78,7 @@ class PlaneManager:
 
         half = PLANE_HALF_SIZE
         mesh = self.server.scene.add_mesh_simple(
-            f"/planes/{plane_id}/pose/mesh",
+            f"{self.scene_prefix}/{plane_id}/pose/mesh",
             vertices=np.array(
                 [
                     [-half, -half, 0.0],
@@ -74,7 +93,7 @@ class PlaneManager:
             side="double",
         )
         normal = self.server.scene.add_arrows(
-            f"/planes/{plane_id}/pose/normal",
+            f"{self.scene_prefix}/{plane_id}/pose/normal",
             points=np.array([[[0.0, 0.0, 0.0], [0.0, 0.0, half * GIZMO_SCALE]]]),
             colors=PENTOS_BLUE,
             shaft_radius=half * 0.012,
@@ -83,6 +102,9 @@ class PlaneManager:
         )
 
         rx, ry, rz = self._euler_degrees(pose.wxyz)
+
+        if self.gui_container is None:
+            raise RuntimeError("Set a GUI container before adding planes")
 
         with self.gui_container:
             folder = self.server.gui.add_folder(
@@ -156,6 +178,20 @@ class PlaneManager:
             self.remove_plane(plane_id)
 
         return plane_id
+
+    def snapshot_planes(self) -> list[PlaneSnapshot]:
+        return [
+            PlaneSnapshot(
+                position=np.array(state.pose.position),
+                wxyz=np.array(state.pose.wxyz),
+            )
+            for state in self.planes.values()
+        ]
+
+    def clear(self) -> None:
+        for plane_id in list(self.planes):
+            self.remove_plane(plane_id)
+        self.next_id = 0
 
     def remove_plane(self, plane_id: int) -> None:
         del_state = self.planes.pop(plane_id, None)

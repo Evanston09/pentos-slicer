@@ -1,6 +1,9 @@
 import base64
 from pathlib import Path
 
+import numpy as np
+import viser
+from machine import BUILD_PLATE_CENTER, BUILD_PLATE_SIZE
 from viser.theme import TitlebarButton, TitlebarConfig, TitlebarImage
 
 BUILD_PLATE_COLOR = (45, 45, 45)
@@ -32,9 +35,53 @@ def titlebar_config() -> TitlebarConfig:
     )
 
 
-def configure_theme(server: "viser.ViserServer") -> None:
+def configure_theme(server: viser.ViserServer) -> None:
     server.gui.configure_theme(
         titlebar_content=titlebar_config(),
         brand_color=PENTOS_BLUE,
         dark_mode=True,
+    )
+
+
+def add_build_plate_scene(server: viser.ViserServer) -> None:
+    server.scene.add_grid(
+        "/shared/grid",
+        width=BUILD_PLATE_SIZE,
+        height=BUILD_PLATE_SIZE,
+        cell_size=5.0,
+        section_size=10.0,
+        position=BUILD_PLATE_CENTER,
+    )
+
+    size = BUILD_PLATE_SIZE
+    vertices = np.array(
+        [
+            [0.0, 0.0, -0.02],
+            [size, 0.0, -0.02],
+            [size, size, -0.02],
+            [0.0, size, -0.02],
+        ],
+    )
+    faces = np.array([[0, 1, 2], [0, 2, 3]])
+    server.scene.add_mesh_simple(
+        "/shared/build_plate/surface",
+        vertices=vertices,
+        faces=faces,
+        color=BUILD_PLATE_COLOR,
+        opacity=0.18,
+        side="double",
+    )
+
+    server.scene.add_line_segments(
+        "/shared/build_plate/outline",
+        points=np.array(
+            [
+                [[0.0, 0.0, 0.0], [size, 0.0, 0.0]],
+                [[size, 0.0, 0.0], [size, size, 0.0]],
+                [[size, size, 0.0], [0.0, size, 0.0]],
+                [[0.0, size, 0.0], [0.0, 0.0, 0.0]],
+            ],
+        ),
+        colors=np.array(PENTOS_ORANGE),
+        line_width=2.0,
     )
