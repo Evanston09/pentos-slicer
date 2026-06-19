@@ -133,7 +133,7 @@ def transition(
         "G90 ; absolute movement\n",
         f"G1 A{a_degrees} B{b_degrees} F1200\n",
         "; --- PENTOS MOVE TO SAFE XY---\n",
-        f"G1 X{initial_xy[0]} B{initial_xy[1]} F1200\n",
+        f"G1 X{initial_xy[0]} Y{initial_xy[1]} F1200\n",
         "; --- PENTOS Z OFFSET ---\n",
         f"SET_GCODE_OFFSET Z={z_offset}\n",
         "G92 E0\n",
