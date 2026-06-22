@@ -7,7 +7,7 @@ import numpy as np
 import trimesh
 
 import gcode_tools
-from machine import BUILD_PLATE_CENTER
+from machine import BUILD_PLATE_CENTER, rotation_matrix
 
 
 class SlicePlane(Protocol):
@@ -49,6 +49,24 @@ class Slicer:
 
         gcode_paths = self.run_prusa_slicer(chunks)
         return self.merge_gcode_files(gcode_paths, chunks, source_name)
+
+    def debug_transition_check(
+        self,
+        mesh: trimesh.Trimesh,
+        planes: list[SlicePlane],
+        source_name: str = "model",
+    ) -> Path:
+        chunks = self.export_stl_chunks(mesh, planes, source_name)
+        if not chunks:
+            raise ValueError("No chunks were generated")
+
+        gcode_paths = self.run_prusa_slicer(chunks)
+        output_path = self.out_dir / f"{source_name}_debug.gcode"
+        return gcode_tools.generate_debug_transition_check(
+            gcode_paths,
+            chunks,
+            output_path,
+        )
 
     def run_prusa_slicer(
         self,
@@ -168,24 +186,7 @@ class Slicer:
 
     @staticmethod
     def rotation_matrix(a_degrees: float, b_degrees: float) -> np.ndarray:
-        a = np.radians(a_degrees)
-        b = np.radians(b_degrees)
-
-        tilt = np.array(
-            [
-                [np.cos(a), 0.0, np.sin(a)],
-                [0.0, 1.0, 0.0],
-                [-np.sin(a), 0.0, np.cos(a)],
-            ],
-        )
-        twist = np.array(
-            [
-                [np.cos(b), -np.sin(b), 0.0],
-                [np.sin(b), np.cos(b), 0.0],
-                [0.0, 0.0, 1.0],
-            ],
-        )
-        return twist @ tilt
+        return rotation_matrix(a_degrees, b_degrees)
 
     @staticmethod
     def ab_angles(base_normal: np.ndarray | None) -> tuple[float, float]:

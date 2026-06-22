@@ -1,4 +1,3 @@
-
 from pathlib import Path
 from typing import Any, Callable
 
@@ -58,6 +57,7 @@ class SetupView:
             scene_prefix="/setup/planes",
         )
         self.add_plane_button: Any | None = None
+        self.debug_mode: Any | None = None
         self.slice_button: Any | None = None
 
     def mount(self) -> None:
@@ -81,6 +81,10 @@ class SetupView:
                 "Add Plane",
                 icon=viser.Icon.SQUARES_DIAGONAL,
             )
+        self.debug_mode = self.server.gui.add_checkbox(
+            "Debug Mode",
+            self.state.debug_mode,
+        )
         self.slice_button = self.server.gui.add_button(
             "Slice",
             icon=viser.Icon.CLOUD_COMPUTING,
@@ -103,6 +107,10 @@ class SetupView:
         def _(_) -> None:
             self.plane_manager.add_plane()
 
+        @self.debug_mode.on_update
+        def _(_) -> None:
+            self.state.debug_mode = self.debug_mode.value
+
         @self.slice_button.on_click
         def _(_) -> None:
             self.handle_slice()
@@ -117,11 +125,12 @@ class SetupView:
 
         for handle in (
             self.slice_button,
+            self.debug_mode,
             self.add_plane_button,
             self.planes_folder,
             self.status,
             self.upload,
-            self.model_handle
+            self.model_handle,
         ):
             if handle is not None:
                 handle.remove()
@@ -130,6 +139,7 @@ class SetupView:
         self.status = None
         self.planes_folder = None
         self.add_plane_button = None
+        self.debug_mode = None
         self.slice_button = None
         self.model_handle = None
 
@@ -183,9 +193,22 @@ class SetupView:
         mesh, source_name = self.state.current_model
 
         try:
+            debug_mode = bool(self.debug_mode.value) if self.debug_mode else False
+            self.state.debug_mode = debug_mode
             if self.status is not None:
-                self.status.value = "Slicing..."
-            output_path = self.slicer.slice(mesh, planes, source_name)
+                self.status.value = (
+                    "Generating debug transition check..."
+                    if debug_mode
+                    else "Slicing..."
+                )
+            if debug_mode:
+                output_path = self.slicer.debug_transition_check(
+                    mesh,
+                    planes,
+                    source_name,
+                )
+            else:
+                output_path = self.slicer.slice(mesh, planes, source_name)
         except Exception as exc:
             if self.status is not None:
                 self.status.value = f"Failed to slice: {exc}"

@@ -22,16 +22,12 @@ class PreviewView:
     def mount(self) -> None:
         self.status = self.server.gui.add_text(
             "Status",
-            "Saved merged G-code",
+            "Saved G-code",
             disabled=True,
         )
         self.output_path = self.server.gui.add_text(
             "Output G-code",
-            (
-                ""
-                if self.state.gcode_path is None
-                else str(self.state.gcode_path)
-            ),
+            ("" if self.state.gcode_path is None else str(self.state.gcode_path)),
             disabled=True,
         )
         self.back_button = self.server.gui.add_button("Back to Setup")
