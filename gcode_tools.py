@@ -16,26 +16,55 @@ class GcodeChunk(Protocol):
 @dataclass
 class GcodeCommand:
     command: str = ""
-    args: list[str] = field(default_factory=list)
+    raw_args: list[str] = field(default_factory=list)
+    args: dict[str, float] = field(default_factory=dict)
     comment: str | None = None
 
     @classmethod
     def parse(cls, line: str) -> Self:
         code, separator, raw_comment = line.strip().partition(";")
         tokens = code.split()
+        raw_args = tokens[1:]
         return cls(
-            command=tokens[0] if tokens else "",
-            args=tokens[1:],
+            command=tokens[0].upper() if tokens else "",
+            raw_args=raw_args,
+            args=parse_gcode_args(raw_args),
             comment=(raw_comment.strip() or None) if separator else None,
         )
 
     def build(self) -> str:
-        code = " ".join([self.command, *self.args]) if self.command else ""
+        code = " ".join([self.command, *self.raw_args]) if self.command else ""
         if self.comment is None:
             return code
         if code:
             return f"{code} ;{self.comment}"
         return f";{self.comment}"
+
+
+def parse_gcode_arg(arg: str) -> tuple[str, float] | None:
+    token = arg.split("*", 1)[0].strip()
+    if len(token) < 2:
+        return None
+
+    key = token[0].upper()
+    if not key.isalpha():
+        return None
+
+    try:
+        return key, float(token[1:])
+    except ValueError:
+        return None
+
+
+def parse_gcode_args(args: list[str]) -> dict[str, float]:
+    parsed_args = {}
+    for arg in args:
+        parsed_arg = parse_gcode_arg(arg)
+        if parsed_arg is None:
+            continue
+        key, value = parsed_arg
+        parsed_args[key] = value
+    return parsed_args
 
 
 @dataclass
@@ -206,7 +235,7 @@ def transform_chunk_gcode(lines: list[str], chunk: GcodeChunk) -> list[str]:
 
     for line in lines:
         parsed = GcodeCommand.parse(line)
-        command = parsed.command.upper()
+        command = parsed.command
 
         if command == "G90":
             absolute_xyz = True
@@ -214,10 +243,9 @@ def transform_chunk_gcode(lines: list[str], chunk: GcodeChunk) -> list[str]:
             absolute_xyz = False
         elif command in {"G0", "G1"} and absolute_xyz:
             moved_xyz = False
-            for arg in parsed.args:
-                key = arg[:1].upper()
+            for key, value in parsed.args.items():
                 if key in flat_position:
-                    flat_position[key] = float(arg[1:])
+                    flat_position[key] = value
                     moved_xyz = True
 
             if moved_xyz:
@@ -232,15 +260,23 @@ def transform_chunk_gcode(lines: list[str], chunk: GcodeChunk) -> list[str]:
                 # Preserve the original line ending while rebuilding the command.
                 stripped = line.rstrip("\r\n")
                 ending = line[len(stripped) :]
-                kept_args = [
-                    arg for arg in parsed.args if arg[:1].upper() not in {"X", "Y", "Z"}
-                ]
-                parsed.args = [
+                kept_args = []
+                for arg in parsed.raw_args:
+                    parsed_arg = parse_gcode_arg(arg)
+                    if parsed_arg is None:
+                        kept_args.append(arg)
+                        continue
+
+                    key, _ = parsed_arg
+                    if key not in {"X", "Y", "Z"}:
+                        kept_args.append(arg)
+                parsed.raw_args = [
                     f"X{real_point[0]}",
                     f"Y{real_point[1]}",
                     f"Z{real_point[2]}",
                     *kept_args,
                 ]
+                parsed.args = parse_gcode_args(parsed.raw_args)
                 line = parsed.build() + ending
 
         transformed.append(line)
@@ -258,10 +294,9 @@ def find_first_last_xyz(lines: list[str]) -> GcodeMotionBounds:
         parsed = GcodeCommand.parse(line)
         if parsed.command not in {"G0", "G1"}:
             continue
-        for arg in parsed.args:
-            key = arg[0].upper()
+        for key, value in parsed.args.items():
             if key in pos:
-                pos[key] = float(arg[1:])
+                pos[key] = value
         x, y, z = pos["X"], pos["Y"], pos["Z"]
         if x is None or y is None or z is None:
             continue
@@ -280,16 +315,25 @@ def find_first_last_xyz(lines: list[str]) -> GcodeMotionBounds:
 def transition(
     initial_xyz: tuple[float, float, float], a_degrees: float, b_degrees: float, extrude = True
 ) -> list[str]:
-    return [
+    gcode = [
         "\n; --- PENTOS A/B TRANSITION ---\n",
-        "G1 E-5 F3600\n" if extrude else ""
-        "G91 ; relative movement for safe lift\n",
-        "G1 Z10 F3000\n",
-        "G90 ; absolute movement\n",
-        f"G1 A{a_degrees} B{b_degrees} F1200\n",
-        "; --- PENTOS MOVE TO NEXT CHUNK ---\n",
-        f"G1 X{initial_xyz[0]} Y{initial_xyz[1]} F1200\n",
-        f"G1 Z{initial_xyz[2]} F1200\n",
-        "G92 E0\n" if extrude else ""
-        "; --- END PENTOS A/B TRANSITION ---\n",
     ]
+    if extrude:
+        gcode.append("G1 E-5 F3600\n")
+
+    gcode.extend(
+        [
+            "G91 ; relative movement for safe lift\n",
+            "G1 Z10 F3000\n",
+            "G90 ; absolute movement\n",
+            f"G1 A{a_degrees} B{b_degrees} F1200\n",
+            "; --- PENTOS MOVE TO NEXT CHUNK ---\n",
+            f"G1 X{initial_xyz[0]} Y{initial_xyz[1]} F1200\n",
+            f"G1 Z{initial_xyz[2]} F1200\n",
+        ]
+    )
+    if extrude:
+        gcode.append("G92 E0\n")
+
+    gcode.append("; --- END PENTOS A/B TRANSITION ---\n")
+    return gcode
