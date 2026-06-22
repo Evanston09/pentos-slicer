@@ -134,6 +134,7 @@ def generate_debug_transition_check(
                 next_bound.first_position,
                 next_chunk.a_degrees,
                 next_chunk.b_degrees,
+                False,
             )
         )
         debug_gcode.append(f"; --- END DEBUG TRANSITION {index - 1} TO {index} ---\n")
@@ -277,17 +278,18 @@ def find_first_last_xyz(lines: list[str]) -> GcodeMotionBounds:
 
 
 def transition(
-    initial_xyz: tuple[float, float, float], a_degrees: float, b_degrees: float
+    initial_xyz: tuple[float, float, float], a_degrees: float, b_degrees: float, extrude = True
 ) -> list[str]:
     return [
         "\n; --- PENTOS A/B TRANSITION ---\n",
-        "G1 E-5 F3600\n",
+        "G1 E-5 F3600\n" if extrude else ""
         "G91 ; relative movement for safe lift\n",
         "G1 Z10 F3000\n",
         "G90 ; absolute movement\n",
         f"G1 A{a_degrees} B{b_degrees} F1200\n",
         "; --- PENTOS MOVE TO NEXT CHUNK ---\n",
-        f"G1 X{initial_xyz[0]} Y{initial_xyz[1]} Z{initial_xyz[2]} F1200\n",
-        "G92 E0\n",
+        f"G1 X{initial_xyz[0]} Y{initial_xyz[1]} F1200\n",
+        f"G1 Z{initial_xyz[2]} F1200\n",
+        "G92 E0\n" if extrude else ""
         "; --- END PENTOS A/B TRANSITION ---\n",
     ]
