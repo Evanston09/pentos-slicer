@@ -10,7 +10,7 @@ Static and sample inputs are kept in `assets/` and `models/`. `pentos_config.ini
 
 - `uv sync` installs the Python environment from `pyproject.toml` and `uv.lock`.
 - `uv run python main.py` starts the local Viser app and prints the browser URL.
-- `uv run black .` formats the Python modules using the configured dev dependency.
+- `uv run ruff format .` formats the Python modules using the configured dev dependency.
 - `uv run python -m compileall .` performs a quick syntax check across the repository.
 
 Slicing requires the external `prusa-slicer` executable on `PATH`; `slice_tools.py` invokes it directly with `pentos_config.ini`.
@@ -72,7 +72,7 @@ the source of truth for A/B sign, pivot, and offset verification.
 
 ## Coding Style & Naming Conventions
 
-Use Black formatting and 4-space indentation. Prefer type annotations for public functions and data containers; current modules use `dataclass`, `Protocol`, and explicit `Path`/`numpy` types where useful. Keep module names lowercase with underscores, function and variable names in `snake_case`, and constants in `UPPER_SNAKE_CASE`. Keep comments short and reserved for non-obvious geometry, machine, or G-code behavior.
+Use Ruff formatting and 4-space indentation. Prefer type annotations for public functions and data containers; current modules use `dataclass`, `Protocol`, and explicit `Path`/`numpy` types where useful. Keep module names lowercase with underscores, function and variable names in `snake_case`, and constants in `UPPER_SNAKE_CASE`. Keep comments short and reserved for non-obvious geometry, machine, or G-code behavior.
 
 ## Testing Guidelines
 

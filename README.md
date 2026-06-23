@@ -79,7 +79,7 @@ imports as the app is split across files.
 Format touched Python files:
 
 ```bash
-uv run black .
+uv run ruff format .
 ```
 
 Run a quick syntax check:
