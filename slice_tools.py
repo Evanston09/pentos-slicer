@@ -7,7 +7,7 @@ import numpy as np
 import trimesh
 
 import gcode_tools
-from machine import BUILD_PLATE_CENTER, rotation_matrix
+from machine import BUILD_PLATE_CENTER, ROTATION_CENTER, rotation_matrix
 
 
 class SlicePlane(Protocol):
@@ -20,6 +20,7 @@ class Chunk:
     path: Path
     base_normal: np.ndarray | None
     z_offset: float
+    flat_xy_offset: np.ndarray
     a_degrees: float
     b_degrees: float
 
@@ -29,7 +30,7 @@ class Slicer:
         self,
         out_dir: Path = Path("output"),
         temp_dir: Path = Path("temp"),
-        rotation_center: np.ndarray | tuple[float, float, float] = BUILD_PLATE_CENTER,
+        rotation_center: np.ndarray | tuple[float, float, float] = ROTATION_CENTER,
     ) -> None:
         self.out_dir = out_dir
         self.temp_dir = temp_dir
@@ -141,13 +142,17 @@ class Slicer:
         chunks = []
         for index, (piece, base_normal) in enumerate(pieces):
             path = self.temp_dir / f"{source_name}_{mesh.identifier_hash}_{index}.stl"
-            piece, z_offset, a_degrees, b_degrees = self._orient(piece, base_normal)
+            piece, z_offset, flat_xy_offset, a_degrees, b_degrees = self._orient(
+                piece,
+                base_normal,
+            )
             piece.export(path)
             chunks.append(
                 Chunk(
                     path=path,
                     base_normal=base_normal,
                     z_offset=z_offset,
+                    flat_xy_offset=flat_xy_offset,
                     a_degrees=a_degrees,
                     b_degrees=b_degrees,
                 )
@@ -164,8 +169,9 @@ class Slicer:
 
     def _orient(
         self, mesh: trimesh.Trimesh, base_normal: np.ndarray | None
-    ) -> tuple[trimesh.Trimesh, float, float, float]:
+    ) -> tuple[trimesh.Trimesh, float, np.ndarray, float, float]:
         a_degrees, b_degrees = self.ab_angles(base_normal)
+        flat_xy_offset = np.zeros(2)
 
         if base_normal is not None:
             transform = np.eye(4)
@@ -178,7 +184,13 @@ class Slicer:
 
         z_offset = float(mesh.bounds[0][2])
         mesh.apply_translation([0, 0, -z_offset])
-        return mesh, z_offset, a_degrees, b_degrees
+
+        if base_normal is not None:
+            flat_center = mesh.bounds.mean(axis=0)[:2]
+            flat_xy_offset = BUILD_PLATE_CENTER[:2] - flat_center
+            mesh.apply_translation([flat_xy_offset[0], flat_xy_offset[1], 0.0])
+
+        return mesh, z_offset, flat_xy_offset, a_degrees, b_degrees
 
     @staticmethod
     def _is_valid(mesh: trimesh.Trimesh | None) -> bool:
@@ -205,7 +217,7 @@ class Slicer:
             return (0.0 if nz >= 0.0 else 180.0), 0.0
 
         a = np.degrees(np.arctan2(horizontal, nz))
-        b = np.degrees(np.arctan2(ny, nx))
+        b = np.degrees(np.arctan2(-ny, nx))
 
         b = ((b + 180.0) % 360.0) - 180.0
 

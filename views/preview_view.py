@@ -5,7 +5,7 @@ import numpy as np
 import viser
 
 from app_state import AppState
-from gcode_tools import GcodeCommand, parse_gcode_args
+from gcode_tools import GcodeCommand, iter_gcode_moves
 from theming import PENTOS_BLUE, PENTOS_ORANGE
 
 SETUP_COLOR = np.array(PENTOS_ORANGE)
@@ -33,17 +33,6 @@ class GcodePreview:
 
 
 def parse_gcode_preview(text: str) -> GcodePreview:
-    current: dict[str, float | None] = {
-        "X": None,
-        "Y": None,
-        "Z": None,
-        "E": 0.0,
-        "A": 0.0,
-        "B": 0.0,
-    }
-    absolute_positioning = True
-    absolute_extrusion = True
-    motion_mode: str | None = None
     has_seen_layer = False
     in_transition = False
     setup_segments: list[list[np.ndarray]] = []
@@ -51,7 +40,10 @@ def parse_gcode_preview(text: str) -> GcodePreview:
     part_extrusion_segments: list[list[np.ndarray]] = []
     parts: list[GcodePreviewPart] = []
 
-    for line in text.splitlines():
+    lines = text.splitlines()
+    moves_by_index = {move.index: move for move in iter_gcode_moves(lines)}
+
+    for index, line in enumerate(lines):
         parsed = GcodeCommand.parse(line)
         comment = parsed.comment
         if comment == "LAYER_CHANGE":
@@ -76,76 +68,21 @@ def parse_gcode_preview(text: str) -> GcodePreview:
             in_transition = False
             continue
 
-        command_word = parsed.command
-        args = parsed.args
-        if command_word and command_word[:1] not in {"G", "M"}:
-            args = parse_gcode_args([parsed.command, *parsed.raw_args])
-            command_word = ""
-
-        if command_word in {"G0", "G1"}:
-            motion_mode = command_word
-        elif command_word == "G90":
-            absolute_positioning = True
-            continue
-        elif command_word == "G91":
-            absolute_positioning = False
-            continue
-        elif command_word == "M82":
-            absolute_extrusion = True
-            continue
-        elif command_word == "M83":
-            absolute_extrusion = False
+        move = moves_by_index.get(index)
+        if move is None:
             continue
 
-        if command_word not in {"G0", "G1"} and motion_mode not in {"G0", "G1"}:
-            continue
-
-        next_position = current.copy()
-        extrusion_delta = 0.0
-        has_xyz = False
-        has_motion_word = False
-
-        for key, value in args.items():
-            if key == "F":
-                continue
-
-            if key in {"X", "Y", "Z", "A", "B"}:
-                has_motion_word = True
-                if key in {"X", "Y", "Z"}:
-                    has_xyz = True
-
-                current_value = next_position[key]
-                if absolute_positioning or current_value is None:
-                    next_position[key] = value
-                else:
-                    next_position[key] = current_value + value
-            elif key == "E":
-                current_e = float(current["E"] or 0.0)
-                if absolute_extrusion:
-                    extrusion_delta = value - current_e
-                    next_position["E"] = value
-                else:
-                    extrusion_delta = value
-                    next_position["E"] = current_e + value
-
-        if has_xyz and all(current[key] is not None for key in ("X", "Y", "Z")):
-            start = np.array(
-                [current["X"], current["Y"], current["Z"]],
-            )
-            end = np.array(
-                [next_position["X"], next_position["Y"], next_position["Z"]],
-            )
+        if move.has_xyz and move.start_xyz is not None and move.end_xyz is not None:
+            start = move.start_xyz
+            end = move.end_xyz
             segment = [start, end]
             if not in_transition:
                 if not has_seen_layer:
                     setup_segments.append(segment)
-                elif extrusion_delta > 0:
+                elif move.extrusion_delta > 0:
                     part_extrusion_segments.append(segment)
                 else:
                     part_travel_segments.append(segment)
-
-        if has_motion_word or extrusion_delta != 0:
-            current = next_position
 
     if part_travel_segments or part_extrusion_segments:
         part_index = len(parts)
