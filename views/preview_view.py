@@ -7,6 +7,7 @@ import viser
 from app_state import AppState
 from gcode_tools import GcodeCommand, iter_gcode_moves
 from integrations import send_to_moonraker
+from machine import MACHINE_OFFSET, ROTATION_CENTER, rotation_matrix
 from theming import PENTOS_BLUE, PENTOS_ORANGE
 
 SETUP_COLOR = np.array(PENTOS_ORANGE)
@@ -33,9 +34,24 @@ class GcodePreview:
     parts: list[GcodePreviewPart]
 
 
+def transform_preview_point(
+    point: np.ndarray,
+    a_degrees: float,
+    b_degrees: float,
+) -> np.ndarray:
+    local_point = point - MACHINE_OFFSET
+    if np.isclose(a_degrees, 0.0) and np.isclose(b_degrees, 0.0):
+        return local_point
+
+    rotation = rotation_matrix(a_degrees, b_degrees)
+    return ROTATION_CENTER + rotation @ (local_point - ROTATION_CENTER)
+
+
 def parse_gcode_preview(text: str) -> GcodePreview:
     has_seen_layer = False
     in_transition = False
+    a_degrees = 0.0
+    b_degrees = 0.0
     setup_segments: list[list[np.ndarray]] = []
     part_travel_segments: list[list[np.ndarray]] = []
     part_extrusion_segments: list[list[np.ndarray]] = []
@@ -47,6 +63,13 @@ def parse_gcode_preview(text: str) -> GcodePreview:
     for index, line in enumerate(lines):
         parsed = GcodeCommand.parse(line)
         comment = parsed.comment
+
+        if parsed.command in {"G0", "G1"}:
+            if "A" in parsed.args:
+                a_degrees = parsed.args["A"]
+            if "B" in parsed.args:
+                b_degrees = parsed.args["B"]
+
         if comment == "LAYER_CHANGE":
             in_transition = False
             has_seen_layer = True
@@ -74,8 +97,16 @@ def parse_gcode_preview(text: str) -> GcodePreview:
             continue
 
         if move.has_xyz and move.start_xyz is not None and move.end_xyz is not None:
-            start = move.start_xyz
-            end = move.end_xyz
+            start = transform_preview_point(
+                move.start_xyz,
+                a_degrees,
+                b_degrees,
+            )
+            end = transform_preview_point(
+                move.end_xyz,
+                a_degrees,
+                b_degrees,
+            )
             segment = [start, end]
             if not in_transition:
                 if not has_seen_layer:
