@@ -166,7 +166,7 @@ def generate_debug_transition_check(
         lines = translate_gcode(lines, MACHINE_OFFSET)
         if index > 0:
             lines = apply_chunk_offsets(lines, chunks[index])
-        bounds.append(find_first_last_extrusion_xyz(lines))
+        bounds.append(find_first_last_xyz(lines))
 
     debug_gcode = [
         "; --- PENTOS DEBUG TRANSITION CHECK ---\n",
@@ -212,7 +212,7 @@ def generate_debug_transition_check(
             "\n; --- END PENTOS DEBUG TRANSITION CHECK ---\n",
             "G90 ; absolute movement\n",
             "G1 Z50 F1200\n",
-            f"G1 X0 Y235 F9000 ; present print\n",
+            "G1 X0 Y235 F9000 ; present print\n",
             "DISABLE_FIVE_AXIS\n",
             "M107 ; turn off fan\n",
             "M84 X Y E ; disable motors\n",
@@ -425,27 +425,6 @@ def find_first_last_xyz(lines: list[str]) -> GcodeBounds:
         if first_position is None:
             first_position = (float(x), float(y), float(z))
         final_position = (float(x), float(y), float(z))
-
-    assert first_position is not None and final_position is not None
-
-    return GcodeBounds(
-        first_position=first_position,
-        final_position=final_position,
-    )
-
-
-def find_first_last_extrusion_xyz(lines: list[str]) -> GcodeBounds:
-    first_position: tuple[float, float, float] | None = None
-    final_position: tuple[float, float, float] | None = None
-
-    for move in iter_gcode_moves(lines):
-        if move.extrusion_delta <= 0.0 or move.end_xyz is None:
-            continue
-
-        first_xyz = move.start_xyz if move.start_xyz is not None else move.end_xyz
-        if first_position is None:
-            first_position = tuple(float(value) for value in first_xyz)
-        final_position = tuple(float(value) for value in move.end_xyz)
 
     assert first_position is not None and final_position is not None
 
