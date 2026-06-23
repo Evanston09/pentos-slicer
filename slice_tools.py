@@ -18,7 +18,7 @@ class SlicePlane(Protocol):
 @dataclass
 class Chunk:
     path: Path
-    base_normal: np.ndarray | None
+    print_up_normal: np.ndarray | None
     z_offset: float
     flat_xy_offset: np.ndarray
     a_degrees: float
@@ -128,29 +128,29 @@ class Slicer:
             normal = self._plane_normal(plane)
             next_pieces = []
 
-            for piece, base_normal in pieces:
+            for piece, print_up_normal in pieces:
                 part_a = piece.slice_plane(plane_position, normal, cap=True)
                 part_b = piece.slice_plane(plane_position, -normal, cap=True)
 
                 if self._is_valid(part_b):
-                    next_pieces.append((part_b, base_normal))
+                    next_pieces.append((part_b, print_up_normal))
                 if self._is_valid(part_a):
-                    next_pieces.append((part_a, -normal))
+                    next_pieces.append((part_a, normal))
 
             pieces = next_pieces
 
         chunks = []
-        for index, (piece, base_normal) in enumerate(pieces):
+        for index, (piece, print_up_normal) in enumerate(pieces):
             path = self.temp_dir / f"{source_name}_{mesh.identifier_hash}_{index}.stl"
             piece, z_offset, flat_xy_offset, a_degrees, b_degrees = self._orient(
                 piece,
-                base_normal,
+                print_up_normal,
             )
             piece.export(path)
             chunks.append(
                 Chunk(
                     path=path,
-                    base_normal=base_normal,
+                    print_up_normal=print_up_normal,
                     z_offset=z_offset,
                     flat_xy_offset=flat_xy_offset,
                     a_degrees=a_degrees,
@@ -168,14 +168,14 @@ class Slicer:
         return normal
 
     def _orient(
-        self, mesh: trimesh.Trimesh, base_normal: np.ndarray | None
+        self, mesh: trimesh.Trimesh, print_up_normal: np.ndarray | None
     ) -> tuple[trimesh.Trimesh, float, np.ndarray, float, float]:
-        a_degrees, b_degrees = self.ab_angles(base_normal)
+        a_degrees, b_degrees = self.ab_angles(print_up_normal)
         flat_xy_offset = np.zeros(2)
 
-        if base_normal is not None:
+        if print_up_normal is not None:
             transform = np.eye(4)
-            transform[:3, :3] = self.rotation_matrix(a_degrees, b_degrees).T
+            transform[:3, :3] = self.rotation_matrix(a_degrees, b_degrees)
             transform = trimesh.transformations.transform_around(
                 transform,
                 self.rotation_center,
@@ -185,7 +185,7 @@ class Slicer:
         z_offset = float(mesh.bounds[0][2])
         mesh.apply_translation([0, 0, -z_offset])
 
-        if base_normal is not None:
+        if print_up_normal is not None:
             flat_center = mesh.bounds.mean(axis=0)[:2]
             flat_xy_offset = BUILD_PLATE_CENTER[:2] - flat_center
             mesh.apply_translation([flat_xy_offset[0], flat_xy_offset[1], 0.0])
@@ -201,14 +201,14 @@ class Slicer:
         return rotation_matrix(a_degrees, b_degrees)
 
     @staticmethod
-    def ab_angles(base_normal: np.ndarray | None) -> tuple[float, float]:
-        if base_normal is None:
+    def ab_angles(print_up_normal: np.ndarray | None) -> tuple[float, float]:
+        if print_up_normal is None:
             return 0.0, 0.0
 
-        normal = -base_normal
+        normal = print_up_normal
         norm = np.linalg.norm(normal)
         if np.isclose(norm, 0.0):
-            raise ValueError("base_normal must be non-zero")
+            raise ValueError("print_up_normal must be non-zero")
         normal = normal / norm
         nx, ny, nz = normal
 
@@ -217,7 +217,7 @@ class Slicer:
             return (0.0 if nz >= 0.0 else 180.0), 0.0
 
         a = np.degrees(np.arctan2(horizontal, nz))
-        b = np.degrees(np.arctan2(-ny, nx))
+        b = np.degrees(np.arctan2(-ny, -nx))
 
         b = ((b + 180.0) % 360.0) - 180.0
 
