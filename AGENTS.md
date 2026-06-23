@@ -15,6 +15,61 @@ Static and sample inputs are kept in `assets/` and `models/`. `pentos_config.ini
 
 Slicing requires the external `prusa-slicer` executable on `PATH`; `slice_tools.py` invokes it directly with `pentos_config.ini`.
 
+## Machine Mechanics Context
+
+The Pentos machine has X/Y/Z Cartesian toolhead motion plus A/B bed rotation.
+
+Coordinate frame:
+
+- `X`, `Y`, and `Z` are literal Cartesian machine axes.
+- "From the front" means standing at `Y=0` and looking toward increasing `Y`
+  (`Y=235` on the current machine).
+- "From the top" means looking down along `-Z`.
+- The slicer-local build plate is `90mm x 90mm`.
+- The slicer-local build plate center is `[45, 45, 0]`.
+- The real machine build plate center is currently `[113, 52, 0]`.
+- `MACHINE_OFFSET` maps slicer-local plate coordinates to the real machine
+  plate center.
+
+A/B rotation conventions:
+
+- `A = 0` means the bed/chunk is flat.
+- Positive `A` tilts clockwise when looking from the front.
+- With positive `A`, the `-X` side rises and the `+X` side lowers.
+- `B` is the circular bed/spindle rotation.
+- Positive `B` spins clockwise when looking from the top.
+- With positive `B`, a mark on the `+X` side moves toward `Y=0`.
+
+The current code models the A/B pose with `rotation_matrix(a, b)` in
+`machine.py`. The tested composition is path-independent: commanding `A` first,
+`B` first, or both in the same move reaches the same final physical pose.
+
+`ROTATION_CENTER` is the slicer-local build plate center with a provisional
+`Z = 1.5mm` pivot height. That hard-coded Z value is subject to change depending
+on bed height, fixture stackup, and measured distance between the modeled bed
+surface and the real A/B rotation axis.
+
+The firmware does not do A/B coordinate compensation. When A or B changes, the
+firmware does not automatically transform future X/Y/Z moves into the rotated
+bed frame. Any required compensation must be handled by the slicer/merge
+pipeline before the G-code reaches the printer.
+
+Slice plane normals are treated as `print_up_normal`: the direction the chunk
+should print from bottom to top in the final object frame. For example, a chunk
+with `print_up_normal = [-1, 0, 0]` is expected to print with `A90 B0` on the
+current machine.
+
+When a chunk is prepared for PrusaSlicer, the chunk may be rotated/flattened and
+then shifted onto the slicer's local build plate. That shift is stored as
+`flat_xy_offset`. It is a temporary PrusaSlicer centering move, not a physical
+machine target by itself. During merge, non-base chunk G-code is translated into
+machine coordinates, shifted up by `z_offset`, and adjusted by
+`-flat_xy_offset` in X/Y so the temporary centering does not move the physical
+continuation point.
+
+Preview rendering is useful for sanity checks, but the real machine behavior is
+the source of truth for A/B sign, pivot, and offset verification.
+
 ## Coding Style & Naming Conventions
 
 Use Black formatting and 4-space indentation. Prefer type annotations for public functions and data containers; current modules use `dataclass`, `Protocol`, and explicit `Path`/`numpy` types where useful. Keep module names lowercase with underscores, function and variable names in `snake_case`, and constants in `UPPER_SNAKE_CASE`. Keep comments short and reserved for non-obvious geometry, machine, or G-code behavior.
