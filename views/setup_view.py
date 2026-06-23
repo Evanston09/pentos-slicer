@@ -349,7 +349,9 @@ class SetupView:
             return
 
         mesh, _ = self.state.current_model
-        self.set_model_placement(self.model_gizmo_handle.position[:2] - self.model_center(mesh)[:2])
+        self.set_model_placement(
+            self.model_gizmo_handle.position[:2] - self.model_center(mesh)[:2]
+        )
 
     def handle_upload(self, event) -> None:
         uploaded = event.target.value

@@ -10,6 +10,6 @@ repos:
     hooks:
       - id: pytest
         name: pytest
-        entry: uv --directory slicer run pytest
+        entry: uv run python -m pytest
         language: system
         pass_filenames: false

@@ -26,7 +26,7 @@ def send_to_moonraker(
         response = requests.post(
             f"{server}/server/files/upload",
             files={"file": file},
-            data = {
+            data={
                 "print": str(start_print).lower(),
             },
             headers=headers,

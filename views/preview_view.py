@@ -245,7 +245,7 @@ class PreviewView:
             self.status.value = "Sending print"
 
         try:
-            result = send_to_moonraker(
+            send_to_moonraker(
                 self.state.gcode_path,
                 start_print=start_print,
             )
