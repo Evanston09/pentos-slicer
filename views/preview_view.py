@@ -43,8 +43,9 @@ def transform_preview_point(
     if np.isclose(a_degrees, 0.0) and np.isclose(b_degrees, 0.0):
         return local_point
 
+    # Merged G-code is in the rotated machine pose; preview in object space.
     rotation = rotation_matrix(a_degrees, b_degrees)
-    return ROTATION_CENTER + rotation @ (local_point - ROTATION_CENTER)
+    return ROTATION_CENTER + rotation.T @ (local_point - ROTATION_CENTER)
 
 
 def parse_gcode_preview(text: str) -> GcodePreview:
