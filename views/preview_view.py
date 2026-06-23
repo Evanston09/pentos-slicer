@@ -6,6 +6,7 @@ import viser
 
 from app_state import AppState
 from gcode_tools import GcodeCommand, iter_gcode_moves
+from integrations import send_to_moonraker
 from theming import PENTOS_BLUE, PENTOS_ORANGE
 
 SETUP_COLOR = np.array(PENTOS_ORANGE)
@@ -112,6 +113,8 @@ class PreviewView:
         self.line_width: Any | None = None
         self.back_button: Any | None = None
         self.setup_handle: Any | None = None
+        self.send_handle: Any | None = None
+        self.send_print_handle: Any | None = None
         self.travel_handles: list[Any] = []
         self.extrusion_handles: list[Any] = []
 
@@ -132,6 +135,14 @@ class PreviewView:
             2.0,
             min=1.0,
             max=10.0,
+        )
+        self.send_handle = self.server.gui.add_button(
+            "Send to Moonraker",
+            icon=viser.Icon.UPLOAD,
+        )
+        self.send_print_handle = self.server.gui.add_button(
+            "Send and Print",
+            icon=viser.Icon.PLAYER_PLAY,
         )
         self.back_button = self.server.gui.add_button("Back to Setup")
 
@@ -159,6 +170,14 @@ class PreviewView:
         def _(_) -> None:
             self.show_setup()
 
+        @self.send_handle.on_click
+        def _(_) -> None:
+            self.handle_send_to_moonraker(start_print=False)
+
+        @self.send_print_handle.on_click
+        def _(_) -> None:
+            self.handle_send_to_moonraker(start_print=True)
+
     def load_preview(self) -> None:
         if self.state.gcode_path is None:
             if self.status is not None:
@@ -183,6 +202,29 @@ class PreviewView:
                 f"{travel_count} travel, "
                 f"{len(preview.setup)} setup"
             )
+
+    def handle_send_to_moonraker(self, start_print: bool) -> None:
+        if self.state.gcode_path is None:
+            if self.status is not None:
+                self.status.value = "No G-code generated"
+            return
+
+        if self.status is not None:
+            self.status.value = "Sending print"
+
+        try:
+            result = send_to_moonraker(
+                self.state.gcode_path,
+                start_print=start_print,
+            )
+        except Exception as exc:
+            if self.status is not None:
+                self.status.value = f"Moonraker upload failed: {exc}"
+            return
+
+        if self.status is not None:
+            if start_print:
+                self.status.value = f"Sent {self.state.gcode_path.name}"
 
     def show_preview(self, preview: GcodePreview) -> None:
         line_width = (
@@ -231,6 +273,8 @@ class PreviewView:
             self.back_button,
             self.line_width,
             self.show_travel,
+            self.send_print_handle,
+            self.send_handle,
             self.output_path,
             self.status,
         ):
@@ -242,6 +286,8 @@ class PreviewView:
         self.show_travel = None
         self.line_width = None
         self.back_button = None
+        self.send_handle = None
+        self.send_print_handle = None
         self.setup_handle = None
         self.travel_handles = []
         self.extrusion_handles = []
