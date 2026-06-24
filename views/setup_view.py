@@ -280,10 +280,10 @@ class SetupView:
             axes="sxyz",
         )
 
-    def model_frame_position(self, mesh: trimesh.Trimesh) -> list[float]:
+    def model_frame_position(self, mesh: trimesh.Trimesh) -> np.ndarray:
         center = self.model_center(mesh)
         xy_position = self.state.model_xy_position
-        return [xy_position[0], xy_position[1], center[2]]
+        return np.array([xy_position[0], xy_position[1], center[2]])
 
     def set_model_placement(
         self,

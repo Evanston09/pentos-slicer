@@ -50,7 +50,7 @@ def add_build_plate_scene(server: viser.ViserServer) -> None:
         height=BUILD_PLATE_SIZE,
         cell_size=5.0,
         section_size=10.0,
-        position=BUILD_PLATE_CENTER,
+        position=np.asarray(BUILD_PLATE_CENTER),
     )
 
     size = BUILD_PLATE_SIZE
