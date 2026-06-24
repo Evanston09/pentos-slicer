@@ -38,6 +38,7 @@ def titlebar_config() -> TitlebarConfig:
 def configure_theme(server: viser.ViserServer) -> None:
     server.gui.configure_theme(
         titlebar_content=titlebar_config(),
+        control_width="large",
         brand_color=PENTOS_BLUE,
         dark_mode=True,
     )

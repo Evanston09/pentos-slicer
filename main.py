@@ -16,5 +16,6 @@ app.show_setup()
 print(f"Open your browser to http://localhost:{server.get_port()}")
 print("Press Ctrl+C to exit")
 
+# Main Loop
 while True:
     time.sleep(10.0)

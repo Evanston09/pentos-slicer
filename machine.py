@@ -11,7 +11,7 @@ MACHINE_OFFSET = [
 ]
 # Provisional physical A/B pivot. Tune this Z value for bed height, fixture
 # stackup, and any measured offset between the modeled bed surface and axis.
-ROTATION_CENTER = [BUILD_PLATE_CENTER[0], BUILD_PLATE_CENTER[1], 0.5]
+ROTATION_CENTER = [BUILD_PLATE_CENTER[0] - 0.5, BUILD_PLATE_CENTER[1], 0.0]
 
 
 def rotation_matrix(a_degrees: float, b_degrees: float) -> np.ndarray:
