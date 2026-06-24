@@ -37,6 +37,12 @@ class PlaneSnapshot:
     position: np.ndarray
     wxyz: np.ndarray
 
+    def as_dict(self) -> dict[str, list[float]]:
+        return {
+            "position": self.position.tolist(),
+            "wxyz": self.wxyz.tolist(),
+        }
+
 
 class PlaneManager:
     def __init__(

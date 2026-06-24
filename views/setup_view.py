@@ -70,6 +70,7 @@ class SetupView:
         )
         self.add_plane_button: Any | None = None
         self.debug_mode: Any | None = None
+        self.export_handle: Any | None = None
         self.slice_button: Any | None = None
 
     def mount(self) -> None:
@@ -125,6 +126,11 @@ class SetupView:
             "Debug Mode",
             self.state.debug_mode,
         )
+        self.export_handle = self.server.gui.add_button(
+            "Export Scene",
+            icon=viser.Icon.PACKAGE_EXPORT,
+            disabled=self.state.current_model is None,
+        )
         self.slice_button = self.server.gui.add_button(
             "Slice",
             icon=viser.Icon.CLOUD_COMPUTING,
@@ -165,6 +171,10 @@ class SetupView:
         def _(_) -> None:
             self.state.debug_mode = self.debug_mode.value
 
+        @self.export_handle.on_click
+        def _(event) -> None:
+            self.handle_export_scene(event)
+
         @self.slice_button.on_click
         def _(_) -> None:
             self.handle_slice()
@@ -180,6 +190,7 @@ class SetupView:
 
         for handle in (
             self.slice_button,
+            self.export_handle,
             self.debug_mode,
             self.add_plane_button,
             self.planes_folder,
@@ -204,6 +215,7 @@ class SetupView:
         self.model_reset_button = None
         self.add_plane_button = None
         self.debug_mode = None
+        self.export_handle = None
         self.slice_button = None
 
     def show_mesh(self, mesh: trimesh.Trimesh) -> None:
@@ -265,6 +277,7 @@ class SetupView:
             self.model_y_position,
             self.model_z_rotation,
             self.model_reset_button,
+            self.export_handle,
         ):
             if handle is not None:
                 handle.disabled = not enabled
@@ -373,6 +386,35 @@ class SetupView:
             if self.status is not None:
                 self.status.value = f"Failed to load {uploaded.name}: {exc}"
                 print(self.status.value)
+
+    def handle_export_scene(self, event: Any) -> None:
+        if self.status is not None:
+            self.status.value = "Exporting scene"
+
+        self.state.plane_snapshots = self.plane_manager.snapshot_planes()
+
+        try:
+            scene_bytes = self.state.save()
+        except Exception as exc:
+            if self.status is not None:
+                self.status.value = f"Scene export failed: {exc}"
+            return
+
+        filename = "pentos_scene.pentos"
+
+        model = self.state.current_model
+        if model is not None:
+            filename = model[1] + ".pentos"
+
+        assert event.client is not None
+        event.client.send_file_download(
+            filename,
+            scene_bytes,
+            save_immediately=True,
+        )
+
+        if self.status is not None:
+            self.status.value = f"Exported {filename}"
 
     def handle_slice(self) -> None:
         if self.state.current_model is None:

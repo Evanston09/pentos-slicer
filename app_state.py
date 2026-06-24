@@ -1,5 +1,8 @@
 from dataclasses import dataclass, field
 from pathlib import Path
+import io
+import json
+import zipfile
 
 import trimesh
 
@@ -17,3 +20,31 @@ class AppState:
     plane_snapshots: list[PlaneSnapshot] = field(default_factory=list)
     gcode_path: Path | None = None
     debug_mode: bool = False
+
+    def save(self) -> bytes:
+        if self.current_model is None:
+            raise ValueError("No model loaded")
+
+        model, model_name = self.current_model
+        model_bytes = model.export(file_type="3mf")
+        assert isinstance(model_bytes, bytes | str)
+
+        manifest = {
+            "format": "pentos",
+            "version": 1,
+            "original_model_name": model_name,
+            "model_xy_position": self.model_xy_position,
+            "model_z_degrees": self.model_z_degrees,
+            "plane_snapshots": [
+                snapshot.as_dict() for snapshot in self.plane_snapshots
+            ],
+            "debug_mode": self.debug_mode,
+        }
+
+        zip_buffer = io.BytesIO()
+
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("manifest.json", json.dumps(manifest))
+            zf.writestr("model.3mf", model_bytes)
+
+        return zip_buffer.getvalue()
