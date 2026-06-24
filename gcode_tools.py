@@ -467,7 +467,7 @@ def transition(
     gcode.extend(
         [
             "G91 ; relative movement for safe lift\n",
-            "G1 Z10 F3000\n",
+            "G1 Z15 F3000\n",
             "G90 ; absolute movement\n",
             f"G1 A{a_degrees} B{b_degrees} F1200\n",
             "; --- PENTOS MOVE TO NEXT CHUNK ---\n",
