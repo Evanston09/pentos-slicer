@@ -56,8 +56,8 @@ class SetupView:
         self.model_mesh_handle: Any | None = None
         self.model_gizmo_handle: Any | None = None
         self.model_folder: Any | None = None
-        self.model_x_offset: Any | None = None
-        self.model_y_offset: Any | None = None
+        self.model_x_position: Any | None = None
+        self.model_y_position: Any | None = None
         self.model_z_rotation: Any | None = None
         self.model_reset_button: Any | None = None
         self.syncing_model_controls = False
@@ -88,15 +88,15 @@ class SetupView:
             expand_by_default=True,
         )
         with self.model_folder:
-            self.model_x_offset = self.server.gui.add_number(
-                "X Offset",
-                float(self.state.model_xy_offset[0]),
+            self.model_x_position = self.server.gui.add_number(
+                "X Position",
+                self.state.model_xy_position[0],
                 step=1.0,
                 disabled=self.state.current_model is None,
             )
-            self.model_y_offset = self.server.gui.add_number(
-                "Y Offset",
-                float(self.state.model_xy_offset[1]),
+            self.model_y_position = self.server.gui.add_number(
+                "Y Position",
+                self.state.model_xy_position[1],
                 step=1.0,
                 disabled=self.state.current_model is None,
             )
@@ -141,11 +141,11 @@ class SetupView:
         def _(event) -> None:
             self.handle_upload(event)
 
-        @self.model_x_offset.on_update
+        @self.model_x_position.on_update
         def _(_) -> None:
             self.handle_model_placement_input()
 
-        @self.model_y_offset.on_update
+        @self.model_y_position.on_update
         def _(_) -> None:
             self.handle_model_placement_input()
 
@@ -155,7 +155,7 @@ class SetupView:
 
         @self.model_reset_button.on_click
         def _(_) -> None:
-            self.set_model_placement([0.0, 0.0], 0.0)
+            self.set_model_placement(BUILD_PLATE_CENTER[:2], 0.0)
 
         @self.add_plane_button.on_click
         def _(_) -> None:
@@ -185,8 +185,8 @@ class SetupView:
             self.planes_folder,
             self.model_reset_button,
             self.model_z_rotation,
-            self.model_y_offset,
-            self.model_x_offset,
+            self.model_y_position,
+            self.model_x_position,
             self.model_folder,
             self.status,
             self.upload,
@@ -198,8 +198,8 @@ class SetupView:
         self.status = None
         self.planes_folder = None
         self.model_folder = None
-        self.model_x_offset = None
-        self.model_y_offset = None
+        self.model_x_position = None
+        self.model_y_position = None
         self.model_z_rotation = None
         self.model_reset_button = None
         self.add_plane_button = None
@@ -261,8 +261,8 @@ class SetupView:
 
     def set_model_controls_enabled(self, enabled: bool) -> None:
         for handle in (
-            self.model_x_offset,
-            self.model_y_offset,
+            self.model_x_position,
+            self.model_y_position,
             self.model_z_rotation,
             self.model_reset_button,
         ):
@@ -285,22 +285,22 @@ class SetupView:
 
     def model_frame_position(self, mesh: trimesh.Trimesh) -> np.ndarray:
         center = self.model_center(mesh)
-        offset = np.asarray(self.state.model_xy_offset, dtype=float)
-        return np.array([center[0] + offset[0], center[1] + offset[1], center[2]])
+        xy_position = self.state.model_xy_position
+        return np.array([xy_position[0], xy_position[1], center[2]])
 
     def set_model_placement(
         self,
-        offset: list[float] | np.ndarray | None = None,
+        xy_position: list[float] | None = None,
         z_degrees: float | None = None,
     ) -> None:
         if self.state.current_model is None:
             return
 
         mesh, _ = self.state.current_model
-        if offset is not None:
-            self.state.model_xy_offset = list(offset)
+        if xy_position is not None:
+            self.state.model_xy_position = xy_position
         if z_degrees is not None:
-            self.state.model_z_degrees = float(z_degrees)
+            self.state.model_z_degrees = z_degrees
 
         position = self.model_frame_position(mesh)
         if self.model_frame_handle is not None:
@@ -313,16 +313,16 @@ class SetupView:
 
     def sync_model_controls(self) -> None:
         if (
-            self.model_x_offset is None
-            or self.model_y_offset is None
+            self.model_x_position is None
+            or self.model_y_position is None
             or self.model_z_rotation is None
         ):
             return
 
         self.syncing_model_controls = True
         try:
-            self.model_x_offset.value = float(self.state.model_xy_offset[0])
-            self.model_y_offset.value = float(self.state.model_xy_offset[1])
+            self.model_x_position.value = float(self.state.model_xy_position[0])
+            self.model_y_position.value = float(self.state.model_xy_position[1])
             self.model_z_rotation.value = float(self.state.model_z_degrees)
         finally:
             self.syncing_model_controls = False
@@ -330,28 +330,22 @@ class SetupView:
     def handle_model_placement_input(self) -> None:
         if (
             self.syncing_model_controls
-            or self.model_x_offset is None
-            or self.model_y_offset is None
+            or self.model_x_position is None
+            or self.model_y_position is None
             or self.model_z_rotation is None
         ):
             return
 
         self.set_model_placement(
-            [
-                float(self.model_x_offset.value),
-                float(self.model_y_offset.value),
-            ],
-            float(self.model_z_rotation.value),
+            [self.model_x_position.value, self.model_y_position.value,],
+            self.model_z_rotation.value,
         )
 
     def handle_model_gizmo_update(self) -> None:
         if self.state.current_model is None or self.model_gizmo_handle is None:
             return
 
-        mesh, _ = self.state.current_model
-        self.set_model_placement(
-            self.model_gizmo_handle.position[:2] - self.model_center(mesh)[:2]
-        )
+        self.set_model_placement(self.model_gizmo_handle.position[:2])
 
     def handle_upload(self, event) -> None:
         uploaded = event.target.value
@@ -364,7 +358,10 @@ class SetupView:
         try:
             mesh = load_model(path)
             self.state.current_model = (mesh, path.stem)
-            self.state.model_xy_offset = [0.0, 0.0]
+            self.state.model_xy_position = [
+                float(BUILD_PLATE_CENTER[0]),
+                float(BUILD_PLATE_CENTER[1]),
+            ]
             self.state.model_z_degrees = 0.0
             self.state.gcode_path = None
             self.show_mesh(mesh)
@@ -397,8 +394,15 @@ class SetupView:
                     point=self.model_center(base_mesh),
                 ),
             )
-        offset = np.asarray(self.state.model_xy_offset, dtype=float)
-        mesh.apply_translation([offset[0], offset[1], 0.0])
+        xy_position = np.asarray(self.state.model_xy_position, dtype=float)
+        center = self.model_center(base_mesh)
+        mesh.apply_translation(
+            [
+                xy_position[0] - center[0],
+                xy_position[1] - center[1],
+                0.0,
+            ]
+        )
 
         try:
             debug_mode = bool(self.debug_mode.value) if self.debug_mode else False

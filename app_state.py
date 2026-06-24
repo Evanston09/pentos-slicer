@@ -3,13 +3,16 @@ from pathlib import Path
 
 import trimesh
 
+from machine import BUILD_PLATE_CENTER
 from plane_manager import PlaneSnapshot
 
 
 @dataclass
 class AppState:
     current_model: tuple[trimesh.Trimesh, str] | None = None
-    model_xy_offset: list[float] = field(default_factory=lambda: [0.0, 0.0])
+    model_xy_position: list[float] = field(
+        default_factory=lambda: [BUILD_PLATE_CENTER[0], BUILD_PLATE_CENTER[1]],
+    )
     model_z_degrees: float = 0.0
     plane_snapshots: list[PlaneSnapshot] = field(default_factory=list)
     gcode_path: Path | None = None
