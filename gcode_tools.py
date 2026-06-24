@@ -130,6 +130,8 @@ def merge_gcode_files(
     for index, gcode_path in enumerate(gcode_paths):
         lines = gcode_path.read_text().splitlines(keepends=True)
         lines = trim_gcode(lines, index, total)
+        if index > 0:
+            lines = remove_leading_retract(lines)
         lines = translate_gcode(lines, MACHINE_OFFSET)
 
         if index > 0:
@@ -163,6 +165,8 @@ def generate_debug_transition_check(
     for index, gcode_path in enumerate(gcode_paths):
         lines = gcode_path.read_text().splitlines(keepends=True)
         lines = trim_gcode(lines, index, total)
+        if index > 0:
+            lines = remove_leading_retract(lines)
         lines = translate_gcode(lines, MACHINE_OFFSET)
         if index > 0:
             lines = apply_chunk_offsets(lines, chunks[index])
@@ -202,7 +206,6 @@ def generate_debug_transition_check(
                 next_bound.first_position,
                 next_chunk.a_degrees,
                 next_chunk.b_degrees,
-                False,
             )
         )
         debug_gcode.append(f"; --- END DEBUG TRANSITION {index - 1} TO {index} ---\n")
@@ -256,6 +259,31 @@ def remove_start(lines: list[str]) -> list[str]:
         0,
     )
     return lines[start:]
+
+
+def remove_leading_retract(lines: list[str]) -> list[str]:
+    cleaned = []
+    before_print_type = True
+
+    for line in lines:
+        if before_print_type and is_comment_line(
+            line,
+            lambda comment: comment is not None and comment.startswith("TYPE:"),
+        ):
+            before_print_type = False
+
+        parsed = GcodeCommand.parse(line)
+        is_leading_retract = (
+            parsed.command in {"G0", "G1"}
+            and parsed.args.get("E", 0.0) < 0.0
+            and all(key in {"E", "F"} for key in parsed.args)
+        )
+        if before_print_type and is_leading_retract:
+            continue
+
+        cleaned.append(line)
+
+    return cleaned
 
 
 def xyz_array(position: dict[str, float | None]) -> np.ndarray | None:
@@ -431,13 +459,10 @@ def transition(
     initial_xyz: tuple[float, float, float],
     a_degrees: float,
     b_degrees: float,
-    extrude=True,
 ) -> list[str]:
     gcode = [
         "\n; --- PENTOS A/B TRANSITION ---\n",
     ]
-    if extrude:
-        gcode.append("G1 E-5 F3600\n")
 
     gcode.extend(
         [
@@ -450,8 +475,6 @@ def transition(
             f"G1 Z{initial_xyz[2]} F1200\n",
         ]
     )
-    if extrude:
-        gcode.append("G92 E0\n")
 
     gcode.append("; --- END PENTOS A/B TRANSITION ---\n")
     return gcode

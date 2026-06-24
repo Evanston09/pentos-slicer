@@ -9,6 +9,8 @@ import trimesh
 import gcode_tools
 from machine import BUILD_PLATE_CENTER, ROTATION_CENTER, rotation_matrix
 
+CONTINUATION_RESTART_EXTRA_MM = 0.25
+
 
 class SlicePlane(Protocol):
     position: np.ndarray
@@ -101,13 +103,44 @@ class Slicer:
                         "0",
                         "--brim-type",
                         "no_brim",
+                        "--retract-restart-extra",
+                        str(CONTINUATION_RESTART_EXTRA_MM),
                     ]
                 )
+
+            command.extend(self._chunk_shell_overrides(index, len(chunks)))
 
             subprocess.run(command, check=True)
             gcode_paths.append(gcode_path)
 
         return gcode_paths
+
+    @staticmethod
+    def _chunk_shell_overrides(index: int, total: int) -> list[str]:
+        if total == 1:
+            return []
+
+        overrides = []
+        if index < total - 1:
+            overrides.extend(
+                [
+                    "--top-solid-layers",
+                    "0",
+                    "--top-solid-min-thickness",
+                    "0",
+                ]
+            )
+        if index > 0:
+            overrides.extend(
+                [
+                    "--bottom-solid-layers",
+                    "0",
+                    "--bottom-solid-min-thickness",
+                    "0",
+                ]
+            )
+
+        return overrides
 
     def merge_gcode_files(
         self,
