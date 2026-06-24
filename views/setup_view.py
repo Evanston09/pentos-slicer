@@ -18,7 +18,7 @@ MODEL_GIZMO_SCALE = 18.0
 
 def normalize_mesh_units(mesh: trimesh.Trimesh) -> None:
     if mesh.units is None:
-        mesh.units = "m" if float(mesh.extents.max()) < 1.0 else "mm"
+        mesh.units = "m" if mesh.extents.max() < 1.0 else "mm"
 
     if mesh.units != "mm":
         mesh.convert_units("mm")
@@ -102,7 +102,7 @@ class SetupView:
             )
             self.model_z_rotation = self.server.gui.add_number(
                 "Rotation Z",
-                float(self.state.model_z_degrees),
+                self.state.model_z_degrees,
                 step=1.0,
                 disabled=self.state.current_model is None,
             )
@@ -221,8 +221,8 @@ class SetupView:
         )
         self.model_mesh_handle = self.server.scene.add_mesh_simple(
             "/setup/model/mesh",
-            vertices=np.asarray(mesh.vertices - center),
-            faces=np.asarray(mesh.faces),
+            vertices=mesh.vertices - center,
+            faces=mesh.faces,
             color=PENTOS_BLUE,
             opacity=0.45,
             side="double",
@@ -273,20 +273,17 @@ class SetupView:
         return mesh.bounds.mean(axis=0)
 
     def model_wxyz(self) -> np.ndarray:
-        return np.asarray(
-            tf.quaternion_from_euler(
-                0.0,
-                0.0,
-                np.radians(float(self.state.model_z_degrees)),
-                axes="sxyz",
-            ),
-            dtype=float,
+        return tf.quaternion_from_euler(
+            0.0,
+            0.0,
+            np.radians(self.state.model_z_degrees),
+            axes="sxyz",
         )
 
-    def model_frame_position(self, mesh: trimesh.Trimesh) -> np.ndarray:
+    def model_frame_position(self, mesh: trimesh.Trimesh) -> list[float]:
         center = self.model_center(mesh)
         xy_position = self.state.model_xy_position
-        return np.array([xy_position[0], xy_position[1], center[2]])
+        return [xy_position[0], xy_position[1], center[2]]
 
     def set_model_placement(
         self,
@@ -298,7 +295,7 @@ class SetupView:
 
         mesh, _ = self.state.current_model
         if xy_position is not None:
-            self.state.model_xy_position = xy_position
+            self.state.model_xy_position = [xy_position[0], xy_position[1]]
         if z_degrees is not None:
             self.state.model_z_degrees = z_degrees
 
@@ -321,9 +318,9 @@ class SetupView:
 
         self.syncing_model_controls = True
         try:
-            self.model_x_position.value = float(self.state.model_xy_position[0])
-            self.model_y_position.value = float(self.state.model_xy_position[1])
-            self.model_z_rotation.value = float(self.state.model_z_degrees)
+            self.model_x_position.value = self.state.model_xy_position[0]
+            self.model_y_position.value = self.state.model_xy_position[1]
+            self.model_z_rotation.value = self.state.model_z_degrees
         finally:
             self.syncing_model_controls = False
 
@@ -337,7 +334,10 @@ class SetupView:
             return
 
         self.set_model_placement(
-            [self.model_x_position.value, self.model_y_position.value,],
+            [
+                self.model_x_position.value,
+                self.model_y_position.value,
+            ],
             self.model_z_rotation.value,
         )
 
@@ -345,7 +345,12 @@ class SetupView:
         if self.state.current_model is None or self.model_gizmo_handle is None:
             return
 
-        self.set_model_placement(self.model_gizmo_handle.position[:2])
+        self.set_model_placement(
+            [
+                self.model_gizmo_handle.position[0],
+                self.model_gizmo_handle.position[1],
+            ]
+        )
 
     def handle_upload(self, event) -> None:
         uploaded = event.target.value
@@ -358,10 +363,7 @@ class SetupView:
         try:
             mesh = load_model(path)
             self.state.current_model = (mesh, path.stem)
-            self.state.model_xy_position = [
-                float(BUILD_PLATE_CENTER[0]),
-                float(BUILD_PLATE_CENTER[1]),
-            ]
+            self.state.model_xy_position = BUILD_PLATE_CENTER[:2]
             self.state.model_z_degrees = 0.0
             self.state.gcode_path = None
             self.show_mesh(mesh)
@@ -389,12 +391,12 @@ class SetupView:
         if not np.isclose(self.state.model_z_degrees, 0.0):
             mesh.apply_transform(
                 tf.rotation_matrix(
-                    np.radians(float(self.state.model_z_degrees)),
+                    np.radians(self.state.model_z_degrees),
                     [0.0, 0.0, 1.0],
                     point=self.model_center(base_mesh),
                 ),
             )
-        xy_position = np.asarray(self.state.model_xy_position, dtype=float)
+        xy_position = self.state.model_xy_position
         center = self.model_center(base_mesh)
         mesh.apply_translation(
             [
@@ -405,7 +407,7 @@ class SetupView:
         )
 
         try:
-            debug_mode = bool(self.debug_mode.value) if self.debug_mode else False
+            debug_mode = self.debug_mode.value if self.debug_mode else False
             self.state.debug_mode = debug_mode
             if self.status is not None:
                 self.status.value = (

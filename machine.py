@@ -2,12 +2,16 @@ import numpy as np
 
 MACHINE_XY_SIZE = 235.0
 BUILD_PLATE_SIZE = 90.0
-BUILD_PLATE_CENTER = np.array([BUILD_PLATE_SIZE / 2.0, BUILD_PLATE_SIZE / 2.0, 0.0])
-MACHINE_BUILD_PLATE_CENTER = np.array([113.0, 52.0, 0.0])
-MACHINE_OFFSET = MACHINE_BUILD_PLATE_CENTER - BUILD_PLATE_CENTER
+BUILD_PLATE_CENTER = [BUILD_PLATE_SIZE / 2, BUILD_PLATE_SIZE / 2, 0.0]
+MACHINE_BUILD_PLATE_CENTER = [113.0, 52.0, 0.0]
+MACHINE_OFFSET = [
+    MACHINE_BUILD_PLATE_CENTER[0] - BUILD_PLATE_CENTER[0],
+    MACHINE_BUILD_PLATE_CENTER[1] - BUILD_PLATE_CENTER[1],
+    MACHINE_BUILD_PLATE_CENTER[2] - BUILD_PLATE_CENTER[2],
+]
 # Provisional physical A/B pivot. Tune this Z value for bed height, fixture
 # stackup, and any measured offset between the modeled bed surface and axis.
-ROTATION_CENTER = BUILD_PLATE_CENTER + np.array([0.0, 0.0, 0.5])
+ROTATION_CENTER = [BUILD_PLATE_CENTER[0], BUILD_PLATE_CENTER[1], 0.5]
 
 
 def rotation_matrix(a_degrees: float, b_degrees: float) -> np.ndarray:

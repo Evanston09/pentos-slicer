@@ -11,7 +11,7 @@ class GcodeChunk(Protocol):
     a_degrees: float
     b_degrees: float
     z_offset: float
-    flat_xy_offset: np.ndarray
+    flat_xy_offset: list[float]
 
 
 @dataclass
@@ -327,7 +327,7 @@ def iter_gcode_moves(lines: Iterable[str]) -> Iterator[GcodeMove]:
                     next_position[key] = current_value + value
             elif key == "E":
                 has_e = True
-                current_e = float(current["E"] or 0.0)
+                current_e = current["E"] or 0.0
                 if absolute_extrusion:
                     extrusion_delta = value - current_e
                     next_position["E"] = value
@@ -390,21 +390,14 @@ def apply_chunk_offsets(lines: list[str], chunk: GcodeChunk) -> list[str]:
                 if key in move.parsed.args:
                     flat_position[key] = move.parsed.args[key]
 
-            flat_point = np.array(
-                [
-                    flat_position["X"] - chunk.flat_xy_offset[0],
-                    flat_position["Y"] - chunk.flat_xy_offset[1],
-                    flat_position["Z"] + chunk.z_offset,
-                ]
-            )
             stripped = move.line.rstrip("\r\n")
             ending = move.line[len(stripped) :]
             transformed[move.index] = (
                 move.parsed.build_with_updated_args(
                     {
-                        "X": flat_point[0],
-                        "Y": flat_point[1],
-                        "Z": flat_point[2],
+                        "X": flat_position["X"] - chunk.flat_xy_offset[0],
+                        "Y": flat_position["Y"] - chunk.flat_xy_offset[1],
+                        "Z": flat_position["Z"] + chunk.z_offset,
                     },
                 )
                 + ending
@@ -423,8 +416,8 @@ def find_first_last_xyz(lines: list[str]) -> GcodeBounds:
 
         x, y, z = move.end_xyz
         if first_position is None:
-            first_position = (float(x), float(y), float(z))
-        final_position = (float(x), float(y), float(z))
+            first_position = (x, y, z)
+        final_position = (x, y, z)
 
     assert first_position is not None and final_position is not None
 

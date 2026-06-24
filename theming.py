@@ -82,6 +82,6 @@ def add_build_plate_scene(server: viser.ViserServer) -> None:
                 [[0.0, size, 0.0], [0.0, 0.0, 0.0]],
             ],
         ),
-        colors=np.array(PENTOS_ORANGE),
+        colors=PENTOS_ORANGE,
         line_width=2.0,
     )

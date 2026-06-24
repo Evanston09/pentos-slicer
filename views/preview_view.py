@@ -10,14 +10,14 @@ from integrations import send_to_moonraker
 from machine import MACHINE_OFFSET, ROTATION_CENTER, rotation_matrix
 from theming import PENTOS_BLUE, PENTOS_ORANGE
 
-SETUP_COLOR = np.array(PENTOS_ORANGE)
+SETUP_COLOR = PENTOS_ORANGE
 PART_COLORS = [
-    np.array(PENTOS_BLUE),
-    np.array(PENTOS_ORANGE),
-    np.array([34, 197, 94]),
-    np.array([236, 72, 153]),
-    np.array([168, 85, 247]),
-    np.array([20, 184, 166]),
+    PENTOS_BLUE,
+    PENTOS_ORANGE,
+    (34, 197, 94),
+    (236, 72, 153),
+    (168, 85, 247),
+    (20, 184, 166),
 ]
 
 
@@ -25,7 +25,7 @@ PART_COLORS = [
 class GcodePreviewPart:
     travel: np.ndarray
     extrusion: np.ndarray
-    color: np.ndarray
+    color: tuple[int, int, int]
 
 
 @dataclass
@@ -182,7 +182,7 @@ class PreviewView:
 
         @self.show_travel.on_update
         def _(_) -> None:
-            visible = bool(self.show_travel.value)
+            visible = self.show_travel.value
             if self.setup_handle is not None:
                 self.setup_handle.visible = visible
             for travel_handle in self.travel_handles:
@@ -190,7 +190,7 @@ class PreviewView:
 
         @self.line_width.on_update
         def _(_) -> None:
-            line_width = float(self.line_width.value)
+            line_width = self.line_width.value
             for extrusion_handle in self.extrusion_handles:
                 extrusion_handle.line_width = line_width
             if self.setup_handle is not None:
@@ -259,11 +259,9 @@ class PreviewView:
                 self.status.value = f"Sent {self.state.gcode_path.name}"
 
     def show_preview(self, preview: GcodePreview) -> None:
-        line_width = (
-            float(self.line_width.value) if self.line_width is not None else 2.0
-        )
+        line_width = self.line_width.value if self.line_width is not None else 2.0
         travel_visible = (
-            bool(self.show_travel.value) if self.show_travel is not None else True
+            self.show_travel.value if self.show_travel is not None else True
         )
 
         if len(preview.setup):

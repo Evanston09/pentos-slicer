@@ -148,9 +148,9 @@ class PlaneManager:
         def update_rotation() -> None:
             if self.synching_gui or plane_id not in self.planes:
                 return
-            rx = np.radians(float(rotation_x.value))
-            ry = np.radians(float(rotation_y.value))
-            rz = np.radians(float(rotation_z.value))
+            rx = np.radians(rotation_x.value)
+            ry = np.radians(rotation_y.value)
+            rz = np.radians(rotation_z.value)
             self._set_plane_pose(
                 plane_id,
                 wxyz=tf.quaternion_from_euler(
@@ -253,7 +253,7 @@ class PlaneManager:
 
     @staticmethod
     def _reset_gizmo(state: PlaneState) -> None:
-        state.anchor.position = np.array(state.pose.position)
+        state.anchor.position = state.pose.position
         state.gizmo.position = neutral_position()
         state.gizmo.wxyz = neutral_wxyz()
 
@@ -294,5 +294,5 @@ class PlaneManager:
 
     @staticmethod
     def _euler_degrees(wxyz):
-        radians = np.asarray(tf.euler_from_quaternion(wxyz, axes="sxyz"), dtype=float)
+        radians = tf.euler_from_quaternion(wxyz, axes="sxyz")
         return np.round(np.degrees(radians), 3)

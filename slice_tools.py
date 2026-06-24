@@ -20,7 +20,7 @@ class Chunk:
     path: Path
     print_up_normal: np.ndarray | None
     z_offset: float
-    flat_xy_offset: np.ndarray
+    flat_xy_offset: list[float]
     a_degrees: float
     b_degrees: float
 
@@ -169,9 +169,9 @@ class Slicer:
 
     def _orient(
         self, mesh: trimesh.Trimesh, print_up_normal: np.ndarray | None
-    ) -> tuple[trimesh.Trimesh, float, np.ndarray, float, float]:
+    ) -> tuple[trimesh.Trimesh, float, list[float], float, float]:
         a_degrees, b_degrees = self.ab_angles(print_up_normal)
-        flat_xy_offset = np.zeros(2)
+        flat_xy_offset = [0.0, 0.0]
 
         if print_up_normal is not None:
             transform = np.eye(4)
@@ -182,12 +182,15 @@ class Slicer:
             )
             mesh.apply_transform(transform)
 
-        z_offset = float(mesh.bounds[0][2])
+        z_offset = mesh.bounds[0][2]
         mesh.apply_translation([0, 0, -z_offset])
 
         if print_up_normal is not None:
             flat_center = mesh.bounds.mean(axis=0)[:2]
-            flat_xy_offset = BUILD_PLATE_CENTER[:2] - flat_center
+            flat_xy_offset = [
+                BUILD_PLATE_CENTER[0] - flat_center[0],
+                BUILD_PLATE_CENTER[1] - flat_center[1],
+            ]
             mesh.apply_translation([flat_xy_offset[0], flat_xy_offset[1], 0.0])
 
         return mesh, z_offset, flat_xy_offset, a_degrees, b_degrees
