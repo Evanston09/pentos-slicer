@@ -75,8 +75,8 @@ class SetupView:
 
     def mount(self) -> None:
         self.upload = self.server.gui.add_upload_button(
-            "Upload Model",
-            mime_type=".stl,.3mf,.obj,.ply",
+            "Upload Model/Scene",
+            mime_type=".stl,.3mf,.obj,.ply,.pentos",
         )
         self.status = self.server.gui.add_text(
             "Status",
@@ -367,6 +367,16 @@ class SetupView:
 
     def handle_upload(self, event) -> None:
         uploaded = event.target.value
+
+        if uploaded.name.lower().endswith(".pentos"):
+            try:
+                self.load_scene_state(AppState.from_bytes(uploaded.content))
+            except Exception as exc:
+                if self.status is not None:
+                    self.status.value = f"Failed to load {uploaded.name}: {exc}"
+                    print(self.status.value)
+            return
+
         upload_dir = Path("uploaded_models")
         upload_dir.mkdir(exist_ok=True)
 
@@ -386,6 +396,30 @@ class SetupView:
             if self.status is not None:
                 self.status.value = f"Failed to load {uploaded.name}: {exc}"
                 print(self.status.value)
+
+    def load_scene_state(self, loaded_state: AppState) -> None:
+        self.clear_model_scene()
+        self.plane_manager.clear()
+
+        self.state.current_model = loaded_state.current_model
+        self.state.model_xy_position = loaded_state.model_xy_position
+        self.state.model_z_degrees = loaded_state.model_z_degrees
+        self.state.plane_snapshots = loaded_state.plane_snapshots
+        self.state.gcode_path = None
+        self.state.debug_mode = loaded_state.debug_mode
+
+        for snapshot in self.state.plane_snapshots:
+            self.plane_manager.add_plane(snapshot.position, snapshot.wxyz)
+
+        if self.debug_mode is not None:
+            self.debug_mode.value = self.state.debug_mode
+
+        if self.state.current_model is not None:
+            mesh, _ = self.state.current_model
+            self.show_mesh(mesh)
+
+        if self.status is not None and self.state.current_model is not None:
+            self.status.value = f"Loaded scene {self.state.current_model[1]}"
 
     def handle_export_scene(self, event: Any) -> None:
         if self.status is not None:

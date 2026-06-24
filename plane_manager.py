@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Self
 
 import numpy as np
 from trimesh import transformations as tf
@@ -36,6 +36,13 @@ class PlaneState:
 class PlaneSnapshot:
     position: np.ndarray
     wxyz: np.ndarray
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Self:
+        return cls(
+            position=np.array(data["position"]),
+            wxyz=np.array(data["wxyz"]),
+        )
 
     def as_dict(self) -> dict[str, list[float]]:
         return {
