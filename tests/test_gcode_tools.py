@@ -99,3 +99,24 @@ def test_apply_chunk_offsets_adjusts_flattened_absolute_moves() -> None:
     assert second.args["X"] == pytest.approx(10.0)
     assert second.args["Y"] == pytest.approx(22.0)
     assert second.args["Z"] == pytest.approx(6.0)
+
+
+def test_remove_leading_retract_keeps_prime_and_print_retracts() -> None:
+    lines = [
+        ";LAYER_CHANGE\n",
+        ";Z:0.2\n",
+        "G1 E-5 F3600\n",
+        "G1 Z.2 F9000\n",
+        "G1 X10 Y20\n",
+        "G1 E5.25 F2400\n",
+        ";TYPE:Perimeter\n",
+        "G1 X20 Y20 E.5\n",
+        "G1 E-3.5 F3600\n",
+    ]
+
+    cleaned = gcode_tools.remove_leading_retract(lines)
+
+    assert "G1 E-5 F3600\n" not in cleaned
+    assert "G1 E5.25 F2400\n" in cleaned
+    assert "G1 X20 Y20 E.5\n" in cleaned
+    assert "G1 E-3.5 F3600\n" in cleaned
