@@ -55,7 +55,7 @@ Sample models are available in `models/`.
 - `views/preview_view.py` owns the post-slice preview shell.
 - `plane_manager.py` manages interactive slice planes.
 - `slice_tools.py` exports oriented STL chunks and invokes PrusaSlicer.
-- `gcode_tools.py` trims and merges generated G-code with Pentos transitions.
+- `gcode_tools/` trims and merges generated G-code with Pentos transitions.
 - `machine.py` stores machine geometry constants.
 - `theming.py` configures the UI theme and shared build plate/grid scene.
 

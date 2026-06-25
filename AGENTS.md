@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This is a small Python 3.13 slicer application with a flat module layout. `main.py` starts the Viser UI, handles model upload, and coordinates slicing. `plane_manager.py` manages interactive slice planes, `slice_tools.py` exports oriented STL chunks and invokes PrusaSlicer, and `gcode_tools.py` merges generated G-code with Pentos A/B transitions. Shared machine constants live in `machine.py`; colors and UI theme setup live in `theming.py`.
+This is a small Python 3.13 slicer application with a mostly flat module layout. `main.py` starts the Viser UI, handles model upload, and coordinates slicing. `plane_manager.py` manages interactive slice planes, `slice_tools.py` exports oriented STL chunks and invokes PrusaSlicer, and `gcode_tools/` merges generated G-code with Pentos A/B transitions. Shared machine constants live in `machine.py`; colors and UI theme setup live in `theming.py`.
 
 Static and sample inputs are kept in `assets/` and `models/`. `pentos_config.ini` is the PrusaSlicer profile used by the slicing pipeline. Generated or local runtime data belongs in `uploaded_models/`, `temp/`, and `output/`; these paths are ignored and should not be committed.
 
