@@ -1,16 +1,9 @@
-from typing import Protocol
-
 import viser
 
 from app_state import AppState
 from slice_tools import Slicer
 from views import PreviewView, SetupView
-
-
-class SceneView(Protocol):
-    def mount(self) -> None: ...
-
-    def unmount(self) -> None: ...
+from views.protocols import SceneView
 
 
 class PentosApp:
