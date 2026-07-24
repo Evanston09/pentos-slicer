@@ -6,6 +6,7 @@ import trimesh
 import viser
 from trimesh import transformations as tf
 
+from auto_planes import AutoPlaneConfig, AutoPlaneSelector
 from app_state import AppState
 from machine import BUILD_PLATE_CENTER
 from plane_manager import PlaneManager
@@ -69,6 +70,8 @@ class SetupView:
             scene_prefix="/setup/planes",
         )
         self.add_plane_button: Any | None = None
+        self.max_auto_planes: Any | None = None
+        self.auto_planes_button: Any | None = None
         self.debug_mode: Any | None = None
         self.export_handle: Any | None = None
         self.slice_button: Any | None = None
@@ -122,6 +125,18 @@ class SetupView:
                 "Add Plane",
                 icon=viser.Icon.SQUARES_DIAGONAL,
             )
+            self.max_auto_planes = self.server.gui.add_number(
+                "Max Auto Planes",
+                2,
+                min=0,
+                max=6,
+                step=1,
+                disabled=self.state.current_model is None,
+            )
+            self.auto_planes_button = self.server.gui.add_button(
+                "Auto Planes",
+                disabled=self.state.current_model is None,
+            )
         self.debug_mode = self.server.gui.add_checkbox(
             "Debug Mode",
             self.state.debug_mode,
@@ -167,6 +182,10 @@ class SetupView:
         def _(_) -> None:
             self.plane_manager.add_plane()
 
+        @self.auto_planes_button.on_click
+        def _(_) -> None:
+            self.handle_auto_planes()
+
         @self.debug_mode.on_update
         def _(_) -> None:
             self.state.debug_mode = self.debug_mode.value
@@ -192,6 +211,8 @@ class SetupView:
             self.slice_button,
             self.export_handle,
             self.debug_mode,
+            self.auto_planes_button,
+            self.max_auto_planes,
             self.add_plane_button,
             self.planes_folder,
             self.model_reset_button,
@@ -214,6 +235,8 @@ class SetupView:
         self.model_z_rotation = None
         self.model_reset_button = None
         self.add_plane_button = None
+        self.max_auto_planes = None
+        self.auto_planes_button = None
         self.debug_mode = None
         self.export_handle = None
         self.slice_button = None
@@ -278,6 +301,8 @@ class SetupView:
             self.model_z_rotation,
             self.model_reset_button,
             self.export_handle,
+            self.max_auto_planes,
+            self.auto_planes_button,
         ):
             if handle is not None:
                 handle.disabled = not enabled
@@ -297,6 +322,32 @@ class SetupView:
         center = self.model_center(mesh)
         xy_position = self.state.model_xy_position
         return np.array([xy_position[0], xy_position[1], center[2]])
+
+    def placed_model(self) -> tuple[trimesh.Trimesh, str] | None:
+        if self.state.current_model is None:
+            return None
+
+        base_mesh, source_name = self.state.current_model
+        mesh = base_mesh.copy()
+        if not np.isclose(self.state.model_z_degrees, 0.0):
+            mesh.apply_transform(
+                tf.rotation_matrix(
+                    np.radians(self.state.model_z_degrees),
+                    [0.0, 0.0, 1.0],
+                    point=self.model_center(base_mesh),
+                ),
+            )
+
+        xy_position = self.state.model_xy_position
+        center = self.model_center(base_mesh)
+        mesh.apply_translation(
+            [
+                xy_position[0] - center[0],
+                xy_position[1] - center[1],
+                0.0,
+            ]
+        )
+        return mesh, source_name
 
     def set_model_placement(
         self,
@@ -450,37 +501,56 @@ class SetupView:
         if self.status is not None:
             self.status.value = f"Exported {filename}"
 
+    def handle_auto_planes(self) -> None:
+        placed_model = self.placed_model()
+        if placed_model is None:
+            if self.status is not None:
+                self.status.value = "Load a model before selecting planes"
+            return
+
+        if self.max_auto_planes is None:
+            if self.status is not None:
+                self.status.value = "Auto plane controls are not available"
+            return
+
+        mesh, _ = placed_model
+        max_planes = int(round(self.max_auto_planes.value))
+
+        if self.status is not None:
+            self.status.value = "Selecting auto planes..."
+
+        try:
+            selector = AutoPlaneSelector(AutoPlaneConfig(max_planes=max_planes))
+            planes = selector.select(mesh)
+        except Exception as exc:
+            if self.status is not None:
+                self.status.value = f"Auto plane selection failed: {exc}"
+                print(self.status.value)
+            return
+
+        self.plane_manager.clear()
+        for plane in planes:
+            self.plane_manager.add_plane(plane.position, plane.wxyz)
+
+        self.state.plane_snapshots = self.plane_manager.snapshot_planes()
+
+        if self.status is not None:
+            if not planes:
+                self.status.value = (
+                    "Auto Planes: no split beat baseline; flat slicing is available"
+                )
+            else:
+                self.status.value = f"Auto Planes: selected {len(planes)} plane(s)"
+
     def handle_slice(self) -> None:
-        if self.state.current_model is None:
+        placed_model = self.placed_model()
+        if placed_model is None:
             if self.status is not None:
                 self.status.value = "Load a model before slicing"
             return
 
-        if not self.plane_manager.planes:
-            if self.status is not None:
-                self.status.value = "Add a plane before slicing"
-            return
-
         planes = self.plane_manager.get_all_planes()
-        base_mesh, source_name = self.state.current_model
-        mesh = base_mesh.copy()
-        if not np.isclose(self.state.model_z_degrees, 0.0):
-            mesh.apply_transform(
-                tf.rotation_matrix(
-                    np.radians(self.state.model_z_degrees),
-                    [0.0, 0.0, 1.0],
-                    point=self.model_center(base_mesh),
-                ),
-            )
-        xy_position = self.state.model_xy_position
-        center = self.model_center(base_mesh)
-        mesh.apply_translation(
-            [
-                xy_position[0] - center[0],
-                xy_position[1] - center[1],
-                0.0,
-            ]
-        )
+        mesh, source_name = placed_model
 
         try:
             debug_mode = self.debug_mode.value if self.debug_mode else False

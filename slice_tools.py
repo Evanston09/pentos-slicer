@@ -10,6 +10,7 @@ import gcode_tools
 from machine import BUILD_PLATE_CENTER, ROTATION_CENTER, rotation_matrix
 
 CONTINUATION_RESTART_EXTRA_MM = 0.25
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().with_name("pentos_config.ini")
 
 
 class SlicePlane(Protocol):
@@ -25,6 +26,53 @@ class Chunk:
     flat_xy_offset: list[float]
     a_degrees: float
     b_degrees: float
+
+
+@dataclass
+class MeshPiece:
+    mesh: trimesh.Trimesh
+    print_up_normal: np.ndarray | None
+
+
+def plane_normal(plane: SlicePlane) -> np.ndarray:
+    # Only care about rotation and we start pointing up.
+    rotation_matrix = trimesh.transformations.quaternion_matrix(plane.wxyz)[:3, :3]
+    return rotation_matrix @ np.array([0.0, 0.0, 1.0])
+
+
+def is_valid_mesh(mesh: trimesh.Trimesh | None) -> bool:
+    return mesh is not None and len(mesh.vertices) > 0 and len(mesh.faces) > 0
+
+
+def decompose_mesh(
+    mesh: trimesh.Trimesh,
+    planes: list[SlicePlane],
+    cap: bool,
+) -> list[MeshPiece]:
+    pieces = [MeshPiece(mesh, None)]
+
+    for plane in planes:
+        plane_position = plane.position
+        normal = plane_normal(plane)
+        next_pieces = []
+
+        for piece in pieces:
+            part_a = piece.mesh.slice_plane(plane_position, normal, cap=cap)
+            part_b = piece.mesh.slice_plane(plane_position, -normal, cap=cap)
+            valid_a = is_valid_mesh(part_a)
+            valid_b = is_valid_mesh(part_b)
+
+            if valid_a and valid_b:
+                next_pieces.append(MeshPiece(part_b, piece.print_up_normal))
+                next_pieces.append(MeshPiece(part_a, normal))
+            elif valid_b:
+                next_pieces.append(MeshPiece(part_b, piece.print_up_normal))
+            elif valid_a:
+                next_pieces.append(MeshPiece(part_a, piece.print_up_normal))
+
+        pieces = next_pieces
+
+    return pieces
 
 
 class Slicer:
@@ -74,7 +122,7 @@ class Slicer:
     def run_prusa_slicer(
         self,
         chunks: list[Chunk],
-        config_path: Path = Path("pentos_config.ini"),
+        config_path: Path = DEFAULT_CONFIG_PATH,
         slicer_cmd: str = "prusa-slicer",
     ) -> list[Path]:
         gcode_paths = []
@@ -154,36 +202,20 @@ class Slicer:
     def export_stl_chunks(
         self, mesh: trimesh.Trimesh, planes: list[SlicePlane], source_name: str
     ) -> list[Chunk]:
-        pieces = [(mesh, None)]
-
-        for plane in planes:
-            plane_position = plane.position
-            normal = self._plane_normal(plane)
-            next_pieces = []
-
-            for piece, print_up_normal in pieces:
-                part_a = piece.slice_plane(plane_position, normal, cap=True)
-                part_b = piece.slice_plane(plane_position, -normal, cap=True)
-
-                if self._is_valid(part_b):
-                    next_pieces.append((part_b, print_up_normal))
-                if self._is_valid(part_a):
-                    next_pieces.append((part_a, normal))
-
-            pieces = next_pieces
+        pieces = decompose_mesh(mesh, planes, cap=True)
 
         chunks = []
-        for index, (piece, print_up_normal) in enumerate(pieces):
+        for index, piece in enumerate(pieces):
             path = self.temp_dir / f"{source_name}_{mesh.identifier_hash}_{index}.stl"
-            piece, z_offset, flat_xy_offset, a_degrees, b_degrees = self._orient(
-                piece,
-                print_up_normal,
+            oriented, z_offset, flat_xy_offset, a_degrees, b_degrees = self._orient(
+                piece.mesh,
+                piece.print_up_normal,
             )
-            piece.export(path)
+            oriented.export(path)
             chunks.append(
                 Chunk(
                     path=path,
-                    print_up_normal=print_up_normal,
+                    print_up_normal=piece.print_up_normal,
                     z_offset=z_offset,
                     flat_xy_offset=flat_xy_offset,
                     a_degrees=a_degrees,
@@ -192,13 +224,6 @@ class Slicer:
             )
 
         return chunks
-
-    @staticmethod
-    def _plane_normal(plane: SlicePlane) -> np.ndarray:
-        # Only care about rotation and we start pointing up
-        rotation_matrix = trimesh.transformations.quaternion_matrix(plane.wxyz)[:3, :3]
-        normal = rotation_matrix @ np.array([0.0, 0.0, 1.0])
-        return normal
 
     def _orient(
         self, mesh: trimesh.Trimesh, print_up_normal: np.ndarray | None
@@ -227,10 +252,6 @@ class Slicer:
             mesh.apply_translation([flat_xy_offset[0], flat_xy_offset[1], 0.0])
 
         return mesh, z_offset, flat_xy_offset, a_degrees, b_degrees
-
-    @staticmethod
-    def _is_valid(mesh: trimesh.Trimesh | None) -> bool:
-        return mesh is not None and len(mesh.vertices) > 0 and len(mesh.faces) > 0
 
     @staticmethod
     def rotation_matrix(a_degrees: float, b_degrees: float) -> np.ndarray:
