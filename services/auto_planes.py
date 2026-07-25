@@ -5,7 +5,13 @@ import numpy as np
 import trimesh
 from trimesh import transformations as tf
 
-from services.slicing import DEFAULT_CONFIG_PATH, Slicer, decompose_mesh
+from services.slicing import (
+    DEFAULT_CONFIG_PATH,
+    SlicePlane,
+    Slicer,
+    decompose_mesh,
+    plane_normal,
+)
 
 
 def _read_prusa_float(path: Path, key: str, fallback: float) -> float:
@@ -76,6 +82,38 @@ class _SearchState:
     planes: list[AutoPlaneCandidate]
     total: float
     chunk_count: int
+
+
+def face_print_directions(
+    mesh: trimesh.Trimesh,
+    planes: list[SlicePlane],
+) -> np.ndarray:
+    directions = np.tile(DEFAULT_PRINT_DIRECTION, (len(mesh.faces), 1))
+    for plane in planes:
+        normal = plane_normal(plane)
+        normal_side = (mesh.triangles_center - plane.position) @ normal >= 0.0
+        directions[normal_side] = normal
+    return directions
+
+
+def overhang_face_mask(
+    mesh: trimesh.Trimesh,
+    print_directions: np.ndarray | None,
+    threshold_degrees: float,
+) -> np.ndarray:
+    directions = np.asarray(
+        DEFAULT_PRINT_DIRECTION if print_directions is None else print_directions,
+        dtype=float,
+    )
+    directions = directions / np.linalg.norm(directions, axis=-1, keepdims=True)
+    dots = np.clip(
+        np.sum(mesh.face_normals * directions, axis=1),
+        -1.0,
+        1.0,
+    )
+    return (dots + np.sin(np.radians(threshold_degrees)) < 0.0) & ~_bed_contact_faces(
+        mesh, BED_Z, BED_CONTACT_TOLERANCE
+    )
 
 
 def _evaluate_state(

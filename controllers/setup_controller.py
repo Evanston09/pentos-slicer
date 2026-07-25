@@ -6,7 +6,12 @@ import trimesh
 
 from machine import BUILD_PLATE_CENTER
 from models import AppState, PlaneSnapshot
-from services.auto_planes import AutoPlaneConfig, AutoPlaneSelector
+from services.auto_planes import (
+    AutoPlaneConfig,
+    AutoPlaneSelector,
+    face_print_directions,
+    overhang_face_mask,
+)
 from services.model_tools import (
     load_uploaded_model,
     model_center,
@@ -34,6 +39,8 @@ class SetupViewPort(Protocol):
     ) -> None: ...
 
     def clear_model_scene(self) -> None: ...
+
+    def show_overhang_faces(self, overhang_mask: np.ndarray) -> None: ...
 
     def set_model_controls_enabled(self, enabled: bool) -> None: ...
 
@@ -66,6 +73,7 @@ class SetupController:
         self.slicer = slicer
         self.view = view
         self.show_preview = show_preview
+        self.overhang_threshold_degrees = AutoPlaneConfig().overhang_threshold_degrees
         self.next_plane_id = 0
         self._assign_missing_plane_ids()
 
@@ -120,6 +128,7 @@ class SetupController:
             model_frame_position(self.state, mesh),
             model_wxyz(self.state),
         )
+        self.refresh_overhang_preview()
 
     def reset_model_placement(self) -> None:
         self.set_model_placement(BUILD_PLATE_CENTER[:2], 0.0)
@@ -140,6 +149,7 @@ class SetupController:
         )
         self.state.plane_snapshots.append(plane)
         self.view.add_plane(plane)
+        self.refresh_overhang_preview()
 
     def update_plane(
         self,
@@ -152,15 +162,32 @@ class SetupController:
             return
         plane.position = np.array(position)
         plane.wxyz = self._normalize_quaternion(wxyz)
+        self.refresh_overhang_preview()
 
     def remove_plane(self, plane_id: int) -> None:
         self.state.plane_snapshots = [
             plane for plane in self.state.plane_snapshots if plane.plane_id != plane_id
         ]
         self.view.remove_plane(plane_id)
+        self.refresh_overhang_preview()
 
     def set_debug_mode(self, enabled: bool) -> None:
         self.state.debug_mode = enabled
+
+    def refresh_overhang_preview(self) -> None:
+        model = placed_model(self.state)
+        if model is None:
+            return
+
+        mesh, _ = model
+        directions = face_print_directions(mesh, self.state.plane_snapshots)
+        self.view.show_overhang_faces(
+            overhang_face_mask(
+                mesh,
+                directions,
+                self.overhang_threshold_degrees,
+            )
+        )
 
     def select_auto_planes(self, max_planes: int) -> None:
         model = placed_model(self.state)
@@ -187,6 +214,7 @@ class SetupController:
             for candidate in candidates
         ]
         self.view.replace_planes(self.state.plane_snapshots)
+        self.refresh_overhang_preview()
 
         if not candidates:
             self.view.set_status(

@@ -9,6 +9,7 @@ from viser.theme import TitlebarButton, TitlebarConfig, TitlebarImage
 BUILD_PLATE_COLOR = (45, 45, 45)
 PENTOS_BLUE = (47, 153, 238)
 PENTOS_ORANGE = (255, 130, 0)
+OVERHANG_RED = (239, 68, 68)
 
 
 def logo_to_data_url() -> str:

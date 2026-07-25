@@ -8,7 +8,7 @@ import viser
 
 from models import AppState, PlaneSnapshot
 from views.plane_editor_view import PlaneEditorView
-from views.theming import PENTOS_BLUE
+from views.theming import OVERHANG_RED, PENTOS_BLUE
 
 if TYPE_CHECKING:
     from controllers.setup_controller import SetupController
@@ -23,13 +23,17 @@ class SetupView:
         self.controller: SetupController | None = None
         self.model_frame_handle: Any | None = None
         self.model_mesh_handle: Any | None = None
+        self.model_overhang_handle: Any | None = None
         self.model_gizmo_handle: Any | None = None
+        self.model_faces: np.ndarray | None = None
         self.model_folder: Any | None = None
         self.model_x_position: Any | None = None
         self.model_y_position: Any | None = None
         self.model_z_rotation: Any | None = None
         self.model_reset_button: Any | None = None
         self.syncing_model_controls = False
+        self.show_overhangs: Any | None = None
+        self.show_overhangs_enabled = True
         self.upload: Any | None = None
         self.status: Any | None = None
         self.planes_folder: Any | None = None
@@ -85,6 +89,11 @@ class SetupView:
             )
             self.model_reset_button = self.server.gui.add_button(
                 "Reset Placement",
+                disabled=state.current_model is None,
+            )
+            self.show_overhangs = self.server.gui.add_checkbox(
+                "Show Overhangs",
+                self.show_overhangs_enabled,
                 disabled=state.current_model is None,
             )
 
@@ -148,6 +157,14 @@ class SetupView:
             if self.controller is not None:
                 self.controller.reset_model_placement()
 
+        @self.show_overhangs.on_update
+        def _(_) -> None:
+            self.show_overhangs_enabled = self.show_overhangs.value
+            if self.show_overhangs_enabled and self.controller is not None:
+                self.controller.refresh_overhang_preview()
+            else:
+                self.show_full_model()
+
         @self.add_plane_button.on_click
         def _(_) -> None:
             if self.controller is not None:
@@ -202,6 +219,7 @@ class SetupView:
             self.add_plane_button,
             self.planes_folder,
             self.model_reset_button,
+            self.show_overhangs,
             self.model_z_rotation,
             self.model_y_position,
             self.model_x_position,
@@ -216,6 +234,7 @@ class SetupView:
         self.status = None
         self.planes_folder = None
         self.model_folder = None
+        self.show_overhangs = None
         self.model_x_position = None
         self.model_y_position = None
         self.model_z_rotation = None
@@ -239,6 +258,7 @@ class SetupView:
         wxyz: np.ndarray,
     ) -> None:
         self.clear_model_scene()
+        self.model_faces = mesh.faces
         self.model_frame_handle = self.server.scene.add_frame(
             "/setup/model",
             show_axes=False,
@@ -251,6 +271,14 @@ class SetupView:
             faces=mesh.faces,
             color=PENTOS_BLUE,
             opacity=0.45,
+            side="double",
+        )
+        self.model_overhang_handle = self.server.scene.add_mesh_simple(
+            "/setup/model/overhangs",
+            vertices=mesh.vertices - center,
+            faces=np.empty((0, 3)),
+            color=OVERHANG_RED,
+            opacity=0.85,
             side="double",
         )
         self.model_gizmo_handle = self.server.scene.add_transform_controls(
@@ -278,6 +306,7 @@ class SetupView:
     def clear_model_scene(self) -> None:
         for handle in (
             self.model_gizmo_handle,
+            self.model_overhang_handle,
             self.model_mesh_handle,
             self.model_frame_handle,
         ):
@@ -285,8 +314,10 @@ class SetupView:
                 handle.remove()
 
         self.model_gizmo_handle = None
+        self.model_overhang_handle = None
         self.model_mesh_handle = None
         self.model_frame_handle = None
+        self.model_faces = None
 
     def set_model_controls_enabled(self, enabled: bool) -> None:
         for handle in (
@@ -295,6 +326,7 @@ class SetupView:
             self.model_z_rotation,
             self.model_reset_button,
             self.export_handle,
+            self.show_overhangs,
             self.max_auto_planes,
             self.auto_planes_button,
         ):
@@ -314,6 +346,28 @@ class SetupView:
         if self.model_gizmo_handle is not None:
             self.model_gizmo_handle.position = position
         self._sync_model_controls(xy_position, z_degrees)
+
+    def show_overhang_faces(self, overhang_mask: np.ndarray) -> None:
+        if (
+            not self.show_overhangs_enabled
+            or self.model_faces is None
+            or self.model_mesh_handle is None
+            or self.model_overhang_handle is None
+        ):
+            self.show_full_model()
+            return
+
+        self.model_mesh_handle.faces = self.model_faces[~overhang_mask]
+        self.model_overhang_handle.faces = self.model_faces[overhang_mask]
+        self.model_overhang_handle.visible = bool(np.any(overhang_mask))
+
+    def show_full_model(self) -> None:
+        if self.model_faces is None or self.model_mesh_handle is None:
+            return
+
+        self.model_mesh_handle.faces = self.model_faces
+        if self.model_overhang_handle is not None:
+            self.model_overhang_handle.visible = False
 
     def replace_planes(self, planes: list[PlaneSnapshot]) -> None:
         self.plane_editor.replace_planes(planes)

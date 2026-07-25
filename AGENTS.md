@@ -71,6 +71,21 @@ continuation point.
 Preview rendering is useful for sanity checks, but the real machine behavior is
 the source of truth for A/B sign, pivot, and offset verification.
 
+## Keep Changes Simple
+
+Prefer the smallest coherent change that solves the requested problem. Reuse
+existing control flow and data structures before introducing abstractions,
+background work, debounce logic, configuration, or generalized APIs. Do not
+modify unrelated code or add defensive machinery for cases the application
+cannot produce. Add complexity only when a concrete requirement, failure mode,
+or measured performance problem justifies it.
+
+Keep tests focused on the behavior being added or fixed. Cover the important
+path and meaningful edge cases without expanding the implementation's public
+surface solely to make it testable. After a change works, review the diff and
+remove redundant state, duplicate refreshes, unnecessary callbacks, and helpers
+used only once when inline code is clearer.
+
 ## Coding Style & Naming Conventions
 
 Use Ruff formatting and 4-space indentation. Prefer type annotations for public functions and data containers; current modules use `dataclass`, `Protocol`, and explicit `Path`/`numpy` types where useful. Keep module names lowercase with underscores, function and variable names in `snake_case`, and constants in `UPPER_SNAKE_CASE`. Keep comments short and reserved for non-obvious geometry, machine, or G-code behavior.

@@ -34,6 +34,9 @@ class FakeSetupView:
     def clear_model_scene(self) -> None:
         self.mesh = None
 
+    def show_overhang_faces(self, overhang_mask) -> None:
+        pass
+
     def set_model_controls_enabled(self, enabled: bool) -> None:
         pass
 
