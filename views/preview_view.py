@@ -1,144 +1,23 @@
-from dataclasses import dataclass
-from typing import Any, Callable
+from __future__ import annotations
 
-import numpy as np
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
 import viser
 
-from app_state import AppState
-from gcode_tools import GcodeCommand, iter_gcode_moves
-from integrations import send_to_moonraker
-from machine import MACHINE_OFFSET, ROTATION_CENTER, rotation_matrix
-from theming import PENTOS_BLUE, PENTOS_ORANGE
+from models import GcodePreview
+from views.theming import PENTOS_ORANGE
+
+if TYPE_CHECKING:
+    from controllers.preview_controller import PreviewController
 
 SETUP_COLOR = PENTOS_ORANGE
-PART_COLORS = [
-    PENTOS_BLUE,
-    PENTOS_ORANGE,
-    (34, 197, 94),
-    (236, 72, 153),
-    (168, 85, 247),
-    (20, 184, 166),
-]
-
-
-@dataclass
-class GcodePreviewPart:
-    travel: np.ndarray
-    extrusion: np.ndarray
-    color: tuple[int, int, int]
-
-
-@dataclass
-class GcodePreview:
-    setup: np.ndarray
-    parts: list[GcodePreviewPart]
-
-
-def transform_preview_point(
-    point: np.ndarray,
-    a_degrees: float,
-    b_degrees: float,
-) -> np.ndarray:
-    local_point = point - MACHINE_OFFSET
-    if np.isclose(a_degrees, 0.0) and np.isclose(b_degrees, 0.0):
-        return local_point
-
-    # Merged G-code is in the rotated machine pose; preview in object space.
-    rotation = rotation_matrix(a_degrees, b_degrees)
-    return ROTATION_CENTER + rotation.T @ (local_point - ROTATION_CENTER)
-
-
-def parse_gcode_preview(text: str) -> GcodePreview:
-    has_seen_layer = False
-    in_transition = False
-    a_degrees = 0.0
-    b_degrees = 0.0
-    setup_segments: list[list[np.ndarray]] = []
-    part_travel_segments: list[list[np.ndarray]] = []
-    part_extrusion_segments: list[list[np.ndarray]] = []
-    parts: list[GcodePreviewPart] = []
-
-    lines = text.splitlines()
-    moves_by_index = {move.index: move for move in iter_gcode_moves(lines)}
-
-    for index, line in enumerate(lines):
-        parsed = GcodeCommand.parse(line)
-        comment = parsed.comment
-
-        if parsed.command in {"G0", "G1"}:
-            if "A" in parsed.args:
-                a_degrees = parsed.args["A"]
-            if "B" in parsed.args:
-                b_degrees = parsed.args["B"]
-
-        if comment == "LAYER_CHANGE":
-            in_transition = False
-            has_seen_layer = True
-            continue
-        if comment == "--- PENTOS A/B TRANSITION ---":
-            if part_travel_segments or part_extrusion_segments:
-                part_index = len(parts)
-                parts.append(
-                    GcodePreviewPart(
-                        travel=np.asarray(part_travel_segments),
-                        extrusion=np.asarray(part_extrusion_segments),
-                        color=PART_COLORS[part_index % len(PART_COLORS)],
-                    )
-                )
-                part_travel_segments = []
-                part_extrusion_segments = []
-            in_transition = True
-            continue
-        if comment == "--- END PENTOS A/B TRANSITION ---":
-            in_transition = False
-            continue
-
-        move = moves_by_index.get(index)
-        if move is None:
-            continue
-
-        if move.has_xyz and move.start_xyz is not None and move.end_xyz is not None:
-            start = transform_preview_point(
-                move.start_xyz,
-                a_degrees,
-                b_degrees,
-            )
-            end = transform_preview_point(
-                move.end_xyz,
-                a_degrees,
-                b_degrees,
-            )
-            segment = [start, end]
-            if not in_transition:
-                if not has_seen_layer:
-                    setup_segments.append(segment)
-                elif move.extrusion_delta > 0:
-                    part_extrusion_segments.append(segment)
-                else:
-                    part_travel_segments.append(segment)
-
-    if part_travel_segments or part_extrusion_segments:
-        part_index = len(parts)
-        parts.append(
-            GcodePreviewPart(
-                travel=np.asarray(part_travel_segments),
-                extrusion=np.asarray(part_extrusion_segments),
-                color=PART_COLORS[part_index % len(PART_COLORS)],
-            )
-        )
-    return GcodePreview(setup=np.asarray(setup_segments), parts=parts)
 
 
 class PreviewView:
-    def __init__(
-        self,
-        server: viser.ViserServer,
-        state: AppState,
-        show_setup: Callable[[], None],
-    ) -> None:
+    def __init__(self, server: viser.ViserServer) -> None:
         self.server = server
-        self.state = state
-        self.show_setup = show_setup
+        self.controller: PreviewController | None = None
         self.status: Any | None = None
         self.output_path: Any | None = None
         self.show_travel: Any | None = None
@@ -150,7 +29,10 @@ class PreviewView:
         self.travel_handles: list[Any] = []
         self.extrusion_handles: list[Any] = []
 
-    def mount(self) -> None:
+    def bind_controller(self, controller: PreviewController) -> None:
+        self.controller = controller
+
+    def mount(self, gcode_path: Path | None) -> None:
         self.status = self.server.gui.add_text(
             "Status",
             "Saved G-code",
@@ -158,7 +40,7 @@ class PreviewView:
         )
         self.output_path = self.server.gui.add_text(
             "Output G-code",
-            ("" if self.state.gcode_path is None else str(self.state.gcode_path)),
+            "" if gcode_path is None else str(gcode_path),
             disabled=True,
         )
         self.show_travel = self.server.gui.add_checkbox("Travel", True)
@@ -177,8 +59,6 @@ class PreviewView:
             icon=viser.Icon.PLAYER_PLAY,
         )
         self.back_button = self.server.gui.add_button("Back to Setup")
-
-        self.load_preview()
 
         @self.show_travel.on_update
         def _(_) -> None:
@@ -200,63 +80,22 @@ class PreviewView:
 
         @self.back_button.on_click
         def _(_) -> None:
-            self.show_setup()
+            if self.controller is not None:
+                self.controller.show_setup()
 
         @self.send_handle.on_click
         def _(_) -> None:
-            self.handle_send_to_moonraker(start_print=False)
+            if self.controller is not None:
+                self.controller.send_to_moonraker(start_print=False)
 
         @self.send_print_handle.on_click
         def _(_) -> None:
-            self.handle_send_to_moonraker(start_print=True)
+            if self.controller is not None:
+                self.controller.send_to_moonraker(start_print=True)
 
-    def load_preview(self) -> None:
-        if self.state.gcode_path is None:
-            if self.status is not None:
-                self.status.value = "No G-code generated"
-            return
-
-        try:
-            text = self.state.gcode_path.read_text()
-            preview = parse_gcode_preview(text)
-        except Exception as exc:
-            if self.status is not None:
-                self.status.value = f"Failed to preview G-code: {exc}"
-            return
-
-        self.show_preview(preview)
-        extrusion_count = sum(len(part.extrusion) for part in preview.parts)
-        travel_count = sum(len(part.travel) for part in preview.parts)
+    def set_status(self, message: str) -> None:
         if self.status is not None:
-            self.status.value = (
-                f"Preview: {len(preview.parts)} parts, "
-                f"{extrusion_count} extrusion, "
-                f"{travel_count} travel, "
-                f"{len(preview.setup)} setup"
-            )
-
-    def handle_send_to_moonraker(self, start_print: bool) -> None:
-        if self.state.gcode_path is None:
-            if self.status is not None:
-                self.status.value = "No G-code generated"
-            return
-
-        if self.status is not None:
-            self.status.value = "Sending print"
-
-        try:
-            send_to_moonraker(
-                self.state.gcode_path,
-                start_print=start_print,
-            )
-        except Exception as exc:
-            if self.status is not None:
-                self.status.value = f"Moonraker upload failed: {exc}"
-            return
-
-        if self.status is not None:
-            if start_print:
-                self.status.value = f"Sent {self.state.gcode_path.name}"
+            self.status.value = message
 
     def show_preview(self, preview: GcodePreview) -> None:
         line_width = self.line_width.value if self.line_width is not None else 2.0

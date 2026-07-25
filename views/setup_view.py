@@ -1,58 +1,26 @@
-from pathlib import Path
-from typing import Any, Callable
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import trimesh
 import viser
-from trimesh import transformations as tf
 
-from auto_planes import AutoPlaneConfig, AutoPlaneSelector
-from app_state import AppState
-from machine import BUILD_PLATE_CENTER
-from plane_manager import PlaneManager
-from slice_tools import Slicer
-from theming import PENTOS_BLUE
+from models import AppState, PlaneSnapshot
+from views.plane_editor_view import PlaneEditorView
+from views.theming import PENTOS_BLUE
+
+if TYPE_CHECKING:
+    from controllers.setup_controller import SetupController
 
 MODEL_GIZMO_LINE_WIDTH = 5.0
 MODEL_GIZMO_SCALE = 18.0
 
 
-def normalize_mesh_units(mesh: trimesh.Trimesh) -> None:
-    if mesh.units is None:
-        mesh.units = "m" if mesh.extents.max() < 1.0 else "mm"
-
-    if mesh.units != "mm":
-        mesh.convert_units("mm")
-
-
-def load_model(path: Path) -> trimesh.Trimesh:
-    mesh = trimesh.load_mesh(path)
-    normalize_mesh_units(mesh)
-
-    lower, upper = mesh.bounds
-    mesh_center_xy = (lower[:2] + upper[:2]) / 2.0
-    mesh.apply_translation(
-        [
-            BUILD_PLATE_CENTER[0] - mesh_center_xy[0],
-            BUILD_PLATE_CENTER[1] - mesh_center_xy[1],
-            -lower[2],
-        ]
-    )
-    return mesh
-
-
 class SetupView:
-    def __init__(
-        self,
-        server: viser.ViserServer,
-        state: AppState,
-        slicer: Slicer,
-        show_preview: Callable[[], None],
-    ) -> None:
+    def __init__(self, server: viser.ViserServer) -> None:
         self.server = server
-        self.state = state
-        self.slicer = slicer
-        self.show_preview = show_preview
+        self.controller: SetupController | None = None
         self.model_frame_handle: Any | None = None
         self.model_mesh_handle: Any | None = None
         self.model_gizmo_handle: Any | None = None
@@ -65,8 +33,10 @@ class SetupView:
         self.upload: Any | None = None
         self.status: Any | None = None
         self.planes_folder: Any | None = None
-        self.plane_manager = PlaneManager(
+        self.plane_editor = PlaneEditorView(
             self.server,
+            self._handle_plane_changed,
+            self._handle_plane_deleted,
             scene_prefix="/setup/planes",
         )
         self.add_plane_button: Any | None = None
@@ -76,7 +46,10 @@ class SetupView:
         self.export_handle: Any | None = None
         self.slice_button: Any | None = None
 
-    def mount(self) -> None:
+    def bind_controller(self, controller: SetupController) -> None:
+        self.controller = controller
+
+    def mount(self, state: AppState) -> None:
         self.upload = self.server.gui.add_upload_button(
             "Upload Model/Scene",
             mime_type=".stl,.3mf,.obj,.ply,.pentos",
@@ -94,32 +67,32 @@ class SetupView:
         with self.model_folder:
             self.model_x_position = self.server.gui.add_number(
                 "X Position",
-                self.state.model_xy_position[0],
+                state.model_xy_position[0],
                 step=1.0,
-                disabled=self.state.current_model is None,
+                disabled=state.current_model is None,
             )
             self.model_y_position = self.server.gui.add_number(
                 "Y Position",
-                self.state.model_xy_position[1],
+                state.model_xy_position[1],
                 step=1.0,
-                disabled=self.state.current_model is None,
+                disabled=state.current_model is None,
             )
             self.model_z_rotation = self.server.gui.add_number(
                 "Rotation Z",
-                self.state.model_z_degrees,
+                state.model_z_degrees,
                 step=1.0,
-                disabled=self.state.current_model is None,
+                disabled=state.current_model is None,
             )
             self.model_reset_button = self.server.gui.add_button(
                 "Reset Placement",
-                disabled=self.state.current_model is None,
+                disabled=state.current_model is None,
             )
 
         self.planes_folder = self.server.gui.add_folder(
             "Planes",
             expand_by_default=True,
         )
-        self.plane_manager.gui_container = self.planes_folder
+        self.plane_editor.gui_container = self.planes_folder
         with self.planes_folder:
             self.add_plane_button = self.server.gui.add_button(
                 "Add Plane",
@@ -131,80 +104,93 @@ class SetupView:
                 min=0,
                 max=6,
                 step=1,
-                disabled=self.state.current_model is None,
+                disabled=state.current_model is None,
             )
             self.auto_planes_button = self.server.gui.add_button(
                 "Auto Planes",
-                disabled=self.state.current_model is None,
+                disabled=state.current_model is None,
             )
         self.debug_mode = self.server.gui.add_checkbox(
             "Debug Mode",
-            self.state.debug_mode,
+            state.debug_mode,
         )
         self.export_handle = self.server.gui.add_button(
             "Export Scene",
             icon=viser.Icon.PACKAGE_EXPORT,
-            disabled=self.state.current_model is None,
+            disabled=state.current_model is None,
         )
         self.slice_button = self.server.gui.add_button(
             "Slice",
             icon=viser.Icon.CLOUD_COMPUTING,
         )
 
-        for snapshot in self.state.plane_snapshots:
-            self.plane_manager.add_plane(snapshot.position, snapshot.wxyz)
-
-        if self.state.current_model is not None:
-            mesh, _ = self.state.current_model
-            self.show_mesh(mesh)
-
         @self.upload.on_upload
         def _(event) -> None:
-            self.handle_upload(event)
+            if self.controller is None:
+                return
+            uploaded = event.target.value
+            self.controller.handle_upload(uploaded.name, uploaded.content)
 
         @self.model_x_position.on_update
         def _(_) -> None:
-            self.handle_model_placement_input()
+            self._handle_model_placement_input()
 
         @self.model_y_position.on_update
         def _(_) -> None:
-            self.handle_model_placement_input()
+            self._handle_model_placement_input()
 
         @self.model_z_rotation.on_update
         def _(_) -> None:
-            self.handle_model_placement_input()
+            self._handle_model_placement_input()
 
         @self.model_reset_button.on_click
         def _(_) -> None:
-            self.set_model_placement(BUILD_PLATE_CENTER[:2], 0.0)
+            if self.controller is not None:
+                self.controller.reset_model_placement()
 
         @self.add_plane_button.on_click
         def _(_) -> None:
-            self.plane_manager.add_plane()
+            if self.controller is not None:
+                self.controller.add_plane()
 
         @self.auto_planes_button.on_click
         def _(_) -> None:
-            self.handle_auto_planes()
+            if self.controller is not None and self.max_auto_planes is not None:
+                self.controller.select_auto_planes(
+                    int(round(self.max_auto_planes.value))
+                )
 
         @self.debug_mode.on_update
         def _(_) -> None:
-            self.state.debug_mode = self.debug_mode.value
+            if self.controller is not None:
+                self.controller.set_debug_mode(self.debug_mode.value)
 
         @self.export_handle.on_click
         def _(event) -> None:
-            self.handle_export_scene(event)
+            if self.controller is None:
+                return
+            download = self.controller.export_scene()
+            if download is None:
+                return
+            filename, content = download
+            assert event.client is not None
+            event.client.send_file_download(
+                filename,
+                content,
+                save_immediately=True,
+            )
 
         @self.slice_button.on_click
         def _(_) -> None:
-            self.handle_slice()
+            if self.controller is not None:
+                self.controller.slice_model()
 
     def unmount(self) -> None:
         if self.upload is None:
             return
 
-        self.state.plane_snapshots = self.plane_manager.snapshot_planes()
-        self.plane_manager.clear()
-        self.plane_manager.gui_container = None
+        self.plane_editor.clear()
+        self.plane_editor.gui_container = None
         self.clear_model_scene()
 
         for handle in (
@@ -241,13 +227,18 @@ class SetupView:
         self.export_handle = None
         self.slice_button = None
 
-    def show_mesh(self, mesh: trimesh.Trimesh) -> None:
+    def set_status(self, message: str) -> None:
+        if self.status is not None:
+            self.status.value = message
+
+    def show_mesh(
+        self,
+        mesh: trimesh.Trimesh,
+        center: np.ndarray,
+        position: np.ndarray,
+        wxyz: np.ndarray,
+    ) -> None:
         self.clear_model_scene()
-
-        center = self.model_center(mesh)
-        position = self.model_frame_position(mesh)
-        wxyz = self.model_wxyz()
-
         self.model_frame_handle = self.server.scene.add_frame(
             "/setup/model",
             show_axes=False,
@@ -274,12 +265,15 @@ class SetupView:
 
         @self.model_gizmo_handle.on_update
         def _(_) -> None:
-            self.handle_model_gizmo_update()
+            if self.controller is not None and self.model_gizmo_handle is not None:
+                self.controller.set_model_placement(
+                    [
+                        self.model_gizmo_handle.position[0],
+                        self.model_gizmo_handle.position[1],
+                    ]
+                )
 
         self.set_model_controls_enabled(True)
-        self.sync_model_controls()
-        if self.status is not None and self.state.current_model is not None:
-            self.status.value = f"Loaded {self.state.current_model[1]}"
 
     def clear_model_scene(self) -> None:
         for handle in (
@@ -307,72 +301,38 @@ class SetupView:
             if handle is not None:
                 handle.disabled = not enabled
 
-    def model_center(self, mesh: trimesh.Trimesh) -> np.ndarray:
-        return mesh.bounds.mean(axis=0)
-
-    def model_wxyz(self) -> np.ndarray:
-        return tf.quaternion_from_euler(
-            0.0,
-            0.0,
-            np.radians(self.state.model_z_degrees),
-            axes="sxyz",
-        )
-
-    def model_frame_position(self, mesh: trimesh.Trimesh) -> np.ndarray:
-        center = self.model_center(mesh)
-        xy_position = self.state.model_xy_position
-        return np.array([xy_position[0], xy_position[1], center[2]])
-
-    def placed_model(self) -> tuple[trimesh.Trimesh, str] | None:
-        if self.state.current_model is None:
-            return None
-
-        base_mesh, source_name = self.state.current_model
-        mesh = base_mesh.copy()
-        if not np.isclose(self.state.model_z_degrees, 0.0):
-            mesh.apply_transform(
-                tf.rotation_matrix(
-                    np.radians(self.state.model_z_degrees),
-                    [0.0, 0.0, 1.0],
-                    point=self.model_center(base_mesh),
-                ),
-            )
-
-        xy_position = self.state.model_xy_position
-        center = self.model_center(base_mesh)
-        mesh.apply_translation(
-            [
-                xy_position[0] - center[0],
-                xy_position[1] - center[1],
-                0.0,
-            ]
-        )
-        return mesh, source_name
-
-    def set_model_placement(
+    def update_model_placement(
         self,
-        xy_position: list[float] | None = None,
-        z_degrees: float | None = None,
+        xy_position: list[float],
+        z_degrees: float,
+        position: np.ndarray,
+        wxyz: np.ndarray,
     ) -> None:
-        if self.state.current_model is None:
-            return
-
-        mesh, _ = self.state.current_model
-        if xy_position is not None:
-            self.state.model_xy_position = [xy_position[0], xy_position[1]]
-        if z_degrees is not None:
-            self.state.model_z_degrees = z_degrees
-
-        position = self.model_frame_position(mesh)
         if self.model_frame_handle is not None:
             self.model_frame_handle.position = position
-            self.model_frame_handle.wxyz = self.model_wxyz()
+            self.model_frame_handle.wxyz = wxyz
         if self.model_gizmo_handle is not None:
             self.model_gizmo_handle.position = position
+        self._sync_model_controls(xy_position, z_degrees)
 
-        self.sync_model_controls()
+    def replace_planes(self, planes: list[PlaneSnapshot]) -> None:
+        self.plane_editor.replace_planes(planes)
 
-    def sync_model_controls(self) -> None:
+    def add_plane(self, plane: PlaneSnapshot) -> None:
+        self.plane_editor.add_plane(plane)
+
+    def remove_plane(self, plane_id: int) -> None:
+        self.plane_editor.remove_plane(plane_id)
+
+    def set_debug_mode_value(self, enabled: bool) -> None:
+        if self.debug_mode is not None:
+            self.debug_mode.value = enabled
+
+    def _sync_model_controls(
+        self,
+        xy_position: list[float],
+        z_degrees: float,
+    ) -> None:
         if (
             self.model_x_position is None
             or self.model_y_position is None
@@ -382,22 +342,23 @@ class SetupView:
 
         self.syncing_model_controls = True
         try:
-            self.model_x_position.value = self.state.model_xy_position[0]
-            self.model_y_position.value = self.state.model_xy_position[1]
-            self.model_z_rotation.value = self.state.model_z_degrees
+            self.model_x_position.value = xy_position[0]
+            self.model_y_position.value = xy_position[1]
+            self.model_z_rotation.value = z_degrees
         finally:
             self.syncing_model_controls = False
 
-    def handle_model_placement_input(self) -> None:
+    def _handle_model_placement_input(self) -> None:
         if (
             self.syncing_model_controls
+            or self.controller is None
             or self.model_x_position is None
             or self.model_y_position is None
             or self.model_z_rotation is None
         ):
             return
 
-        self.set_model_placement(
+        self.controller.set_model_placement(
             [
                 self.model_x_position.value,
                 self.model_y_position.value,
@@ -405,175 +366,15 @@ class SetupView:
             self.model_z_rotation.value,
         )
 
-    def handle_model_gizmo_update(self) -> None:
-        if self.state.current_model is None or self.model_gizmo_handle is None:
-            return
+    def _handle_plane_changed(
+        self,
+        plane_id: int,
+        position: np.ndarray,
+        wxyz: np.ndarray,
+    ) -> None:
+        if self.controller is not None:
+            self.controller.update_plane(plane_id, position, wxyz)
 
-        self.set_model_placement(
-            [
-                self.model_gizmo_handle.position[0],
-                self.model_gizmo_handle.position[1],
-            ]
-        )
-
-    def handle_upload(self, event) -> None:
-        uploaded = event.target.value
-
-        if uploaded.name.lower().endswith(".pentos"):
-            try:
-                self.load_scene_state(AppState.from_bytes(uploaded.content))
-            except Exception as exc:
-                if self.status is not None:
-                    self.status.value = f"Failed to load {uploaded.name}: {exc}"
-                    print(self.status.value)
-            return
-
-        upload_dir = Path("uploaded_models")
-        upload_dir.mkdir(exist_ok=True)
-
-        path = upload_dir / uploaded.name
-        path.write_bytes(uploaded.content)
-
-        try:
-            mesh = load_model(path)
-            self.state.current_model = (mesh, path.stem)
-            self.state.model_xy_position = BUILD_PLATE_CENTER[:2]
-            self.state.model_z_degrees = 0.0
-            self.state.gcode_path = None
-            self.show_mesh(mesh)
-            if self.status is not None:
-                print(self.status.value)
-        except Exception as exc:
-            if self.status is not None:
-                self.status.value = f"Failed to load {uploaded.name}: {exc}"
-                print(self.status.value)
-
-    def load_scene_state(self, loaded_state: AppState) -> None:
-        self.clear_model_scene()
-        self.plane_manager.clear()
-
-        self.state.current_model = loaded_state.current_model
-        self.state.model_xy_position = loaded_state.model_xy_position
-        self.state.model_z_degrees = loaded_state.model_z_degrees
-        self.state.plane_snapshots = loaded_state.plane_snapshots
-        self.state.gcode_path = None
-        self.state.debug_mode = loaded_state.debug_mode
-
-        for snapshot in self.state.plane_snapshots:
-            self.plane_manager.add_plane(snapshot.position, snapshot.wxyz)
-
-        if self.debug_mode is not None:
-            self.debug_mode.value = self.state.debug_mode
-
-        if self.state.current_model is not None:
-            mesh, _ = self.state.current_model
-            self.show_mesh(mesh)
-
-        if self.status is not None and self.state.current_model is not None:
-            self.status.value = f"Loaded scene {self.state.current_model[1]}"
-
-    def handle_export_scene(self, event: Any) -> None:
-        if self.status is not None:
-            self.status.value = "Exporting scene"
-
-        self.state.plane_snapshots = self.plane_manager.snapshot_planes()
-
-        try:
-            scene_bytes = self.state.save()
-        except Exception as exc:
-            if self.status is not None:
-                self.status.value = f"Scene export failed: {exc}"
-            return
-
-        filename = "pentos_scene.pentos"
-
-        model = self.state.current_model
-        if model is not None:
-            filename = model[1] + ".pentos"
-
-        assert event.client is not None
-        event.client.send_file_download(
-            filename,
-            scene_bytes,
-            save_immediately=True,
-        )
-
-        if self.status is not None:
-            self.status.value = f"Exported {filename}"
-
-    def handle_auto_planes(self) -> None:
-        placed_model = self.placed_model()
-        if placed_model is None:
-            if self.status is not None:
-                self.status.value = "Load a model before selecting planes"
-            return
-
-        if self.max_auto_planes is None:
-            if self.status is not None:
-                self.status.value = "Auto plane controls are not available"
-            return
-
-        mesh, _ = placed_model
-        max_planes = int(round(self.max_auto_planes.value))
-
-        if self.status is not None:
-            self.status.value = "Selecting auto planes..."
-
-        try:
-            selector = AutoPlaneSelector(AutoPlaneConfig(max_planes=max_planes))
-            planes = selector.select(mesh)
-        except Exception as exc:
-            if self.status is not None:
-                self.status.value = f"Auto plane selection failed: {exc}"
-                print(self.status.value)
-            return
-
-        self.plane_manager.clear()
-        for plane in planes:
-            self.plane_manager.add_plane(plane.position, plane.wxyz)
-
-        self.state.plane_snapshots = self.plane_manager.snapshot_planes()
-
-        if self.status is not None:
-            if not planes:
-                self.status.value = (
-                    "Auto Planes: no split beat baseline; flat slicing is available"
-                )
-            else:
-                self.status.value = f"Auto Planes: selected {len(planes)} plane(s)"
-
-    def handle_slice(self) -> None:
-        placed_model = self.placed_model()
-        if placed_model is None:
-            if self.status is not None:
-                self.status.value = "Load a model before slicing"
-            return
-
-        planes = self.plane_manager.get_all_planes()
-        mesh, source_name = placed_model
-
-        try:
-            debug_mode = self.debug_mode.value if self.debug_mode else False
-            self.state.debug_mode = debug_mode
-            if self.status is not None:
-                self.status.value = (
-                    "Generating debug transition check..."
-                    if debug_mode
-                    else "Slicing..."
-                )
-            if debug_mode:
-                output_path = self.slicer.debug_transition_check(
-                    mesh,
-                    planes,
-                    source_name,
-                )
-            else:
-                output_path = self.slicer.slice(mesh, planes, source_name)
-        except Exception as exc:
-            if self.status is not None:
-                self.status.value = f"Failed to slice: {exc}"
-                print(self.status.value)
-            return
-
-        self.state.gcode_path = output_path
-        self.show_preview()
+    def _handle_plane_deleted(self, plane_id: int) -> None:
+        if self.controller is not None:
+            self.controller.remove_plane(plane_id)

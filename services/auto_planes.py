@@ -5,7 +5,7 @@ import numpy as np
 import trimesh
 from trimesh import transformations as tf
 
-from slice_tools import DEFAULT_CONFIG_PATH, Slicer, decompose_mesh
+from services.slicing import DEFAULT_CONFIG_PATH, Slicer, decompose_mesh
 
 
 def _read_prusa_float(path: Path, key: str, fallback: float) -> float:

@@ -1,11 +1,12 @@
 from dataclasses import dataclass
-from typing import Any, Self
+from typing import Any, Callable
 
 import numpy as np
 from trimesh import transformations as tf
 from viser import ViserServer
 
-from theming import PENTOS_BLUE, PENTOS_ORANGE
+from models import PlaneSnapshot
+from views.theming import PENTOS_BLUE, PENTOS_ORANGE
 
 PLANE_HALF_SIZE = 50.0
 GIZMO_SCALE = 0.45
@@ -32,51 +33,32 @@ class PlaneState:
     start_wxyz: np.ndarray | None = None
 
 
-@dataclass
-class PlaneSnapshot:
-    position: np.ndarray
-    wxyz: np.ndarray
-
-    @classmethod
-    def from_dict(cls, data: dict) -> Self:
-        return cls(
-            position=np.array(data["position"]),
-            wxyz=np.array(data["wxyz"]),
-        )
-
-    def as_dict(self) -> dict[str, list[float]]:
-        return {
-            "position": self.position.tolist(),
-            "wxyz": self.wxyz.tolist(),
-        }
-
-
-class PlaneManager:
+class PlaneEditorView:
     def __init__(
         self,
         server: ViserServer,
+        on_plane_changed: Callable[[int, np.ndarray, np.ndarray], None],
+        on_plane_deleted: Callable[[int], None],
         gui_container: Any | None = None,
         scene_prefix: str = "/planes",
     ):
         self.server = server
+        self.on_plane_changed = on_plane_changed
+        self.on_plane_deleted = on_plane_deleted
         self.gui_container = gui_container
         self.scene_prefix = scene_prefix
-        self.next_id = 0
         self.planes: dict[int, PlaneState] = {}
         self.synching_gui = False
 
-    def add_plane(
-        self,
-        position: np.ndarray | None = None,
-        wxyz: np.ndarray | None = None,
-    ) -> int:
-        plane_id = self.next_id
-        self.next_id += 1
+    def add_plane(self, plane: PlaneSnapshot) -> None:
+        if plane.plane_id is None:
+            raise ValueError("PlaneSnapshot requires a plane_id")
+        plane_id = plane.plane_id
 
         pose = self.server.scene.add_frame(
             f"{self.scene_prefix}/{plane_id}/pose",
-            position=neutral_position() if position is None else position,
-            wxyz=neutral_wxyz() if wxyz is None else self._normalize_quaternion(wxyz),
+            position=plane.position,
+            wxyz=self._normalize_quaternion(plane.wxyz),
         )
         anchor = self.server.scene.add_frame(
             f"{self.scene_prefix}/{plane_id}/gizmo_anchor",
@@ -157,6 +139,7 @@ class PlaneManager:
         def _(_):
             if not self.synching_gui and plane_id in self.planes:
                 self._set_plane_pose(plane_id, position=position.value)
+                self._notify_plane_changed(plane_id)
 
         def update_rotation() -> None:
             if self.synching_gui or plane_id not in self.planes:
@@ -173,6 +156,7 @@ class PlaneManager:
                     axes="sxyz",
                 ),
             )
+            self._notify_plane_changed(plane_id)
 
         @rotation_x.on_update
         def _(_):
@@ -188,23 +172,16 @@ class PlaneManager:
 
         @delete_button.on_click
         def _(_):
-            self.remove_plane(plane_id)
-
-        return plane_id
-
-    def snapshot_planes(self) -> list[PlaneSnapshot]:
-        return [
-            PlaneSnapshot(
-                position=np.array(state.pose.position),
-                wxyz=np.array(state.pose.wxyz),
-            )
-            for state in self.planes.values()
-        ]
+            self.on_plane_deleted(plane_id)
 
     def clear(self) -> None:
         for plane_id in list(self.planes):
             self.remove_plane(plane_id)
-        self.next_id = 0
+
+    def replace_planes(self, planes: list[PlaneSnapshot]) -> None:
+        self.clear()
+        for plane in planes:
+            self.add_plane(plane)
 
     def remove_plane(self, plane_id: int) -> None:
         del_state = self.planes.pop(plane_id, None)
@@ -217,9 +194,6 @@ class PlaneManager:
         del_state.normal.remove()
         del_state.mesh.remove()
         del_state.pose.remove()
-
-    def get_all_planes(self) -> list[Any]:
-        return [state.pose for state in self.planes.values()]
 
     def _set_plane_pose(
         self,
@@ -263,6 +237,7 @@ class PlaneManager:
             self._reset_gizmo(state)
 
         self._sync_gui_from_pose(plane_id)
+        self._notify_plane_changed(plane_id)
 
     @staticmethod
     def _reset_gizmo(state: PlaneState) -> None:
@@ -283,6 +258,16 @@ class PlaneManager:
             state.gui["rotation_z"].value = rz
         finally:
             self.synching_gui = False
+
+    def _notify_plane_changed(self, plane_id: int) -> None:
+        state = self.planes.get(plane_id)
+        if state is None:
+            return
+        self.on_plane_changed(
+            plane_id,
+            np.array(state.pose.position),
+            np.array(state.pose.wxyz),
+        )
 
     @staticmethod
     def _remove_gui(state: PlaneState):

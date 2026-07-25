@@ -42,37 +42,36 @@ http://localhost:8080
 5. The app switches to a preview shell showing the generated G-code path.
 6. Click **Back to Setup** to return to the model and plane controls.
 
-Sample models are available in `models/`.
+Sample models are available in `samples/`.
 
 ## Project Layout
 
-- `main.py` starts the Viser server and mounts the app.
-- `app.py` wires app state, services, and views together.
-- `app_state.py` stores shared UI state such as the loaded model, plane
-  snapshots, and generated G-code path.
-- `views/setup_view.py` owns upload, model display, plane controls, and the
-  Slice button.
-- `views/preview_view.py` owns the post-slice preview shell.
-- `plane_manager.py` manages interactive slice planes.
-- `slice_tools.py` exports oriented STL chunks and invokes PrusaSlicer.
+- `main.py` starts the Viser server and mounts the application controller.
+- `models/` stores shared application state, plane snapshots, and preview data.
+- `controllers/` coordinates setup, preview, slicing, export, and navigation.
+- `views/` contains the Viser UI, scene rendering, plane editor, and theme.
+- `services/` contains model/project I/O, preview parsing, auto-plane selection,
+  slicing, and Moonraker integration.
 - `gcode_tools/` trims and merges generated G-code with Pentos transitions.
 - `machine.py` stores machine geometry constants.
-- `theming.py` configures the UI theme and shared build plate/grid scene.
+- `samples/` contains example models and saved Pentos scenes.
 
 Generated runtime files are written to `uploaded_models/`, `temp/`, and
 `output/`. These are local outputs and should not be committed.
 
 ## App Structure
 
-`PentosApp` is the composition root. It creates shared state and injects only
-the dependencies each view needs:
+`AppController` is the composition root. It creates the shared `AppState`,
+services, screen controllers, and views:
 
-- `SetupView` receives app state, the slicer service, and a `show_preview`
-  callback.
-- `PreviewView` receives app state and a `show_setup` callback.
+- Models hold data independently of Viser and external processes.
+- Controllers mutate application state and coordinate services.
+- Services perform geometry, filesystem, slicing, parsing, and network work.
+- Views create Viser handles, render state, and forward user actions.
 
-This keeps the views from importing `PentosApp` directly, which avoids circular
-imports as the app is split across files.
+Plane edits update controller-owned snapshots as they happen. Runtime plane IDs
+are not included in version-1 `.pentos` manifests, so existing scenes remain
+compatible.
 
 ## Development Checks
 
@@ -82,9 +81,10 @@ Format touched Python files:
 uv run ruff format .
 ```
 
-Run a quick syntax check:
+Run tests and a quick syntax check:
 
 ```bash
+uv run pytest
 uv run python -m compileall .
 ```
 
