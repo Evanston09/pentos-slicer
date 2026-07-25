@@ -2,18 +2,19 @@
 
 ## Project Structure & Module Organization
 
-This is a small Python 3.13 slicer application with a mostly flat module layout. `main.py` starts the Viser UI, handles model upload, and coordinates slicing. `plane_manager.py` manages interactive slice planes, `slice_tools.py` exports oriented STL chunks and invokes PrusaSlicer, and `gcode_tools/` merges generated G-code with Pentos A/B transitions. Shared machine constants live in `machine.py`; colors and UI theme setup live in `theming.py`.
+This is a small Python 3.13 slicer application organized into MVC packages. `main.py` starts the Viser UI. `models/` stores shared state, `controllers/` coordinates workflows, `views/` owns Viser rendering, and `services/` contains model I/O, slicing, preview parsing, and integrations. `gcode_tools/` merges generated G-code with Pentos A/B transitions. Shared machine constants live in `machine.py`; colors and UI theme setup live in `views/theming.py`.
 
-Static and sample inputs are kept in `assets/` and `models/`. `pentos_config.ini` is the PrusaSlicer profile used by the slicing pipeline. Generated or local runtime data belongs in `uploaded_models/`, `temp/`, and `output/`; these paths are ignored and should not be committed.
+Static and sample inputs are kept in `assets/` and `samples/`. `pentos_config.ini` is the PrusaSlicer profile used by the slicing pipeline. Generated or local runtime data belongs in `uploaded_models/`, `temp/`, and `output/`; these paths are ignored and should not be committed.
 
 ## Build, Test, and Development Commands
 
 - `uv sync` installs the Python environment from `pyproject.toml` and `uv.lock`.
 - `uv run python main.py` starts the local Viser app and prints the browser URL.
+- `uv run pytest` runs the automated test suite.
 - `uv run ruff format .` formats the Python modules using the configured dev dependency.
 - `uv run python -m compileall .` performs a quick syntax check across the repository.
 
-Slicing requires the external `prusa-slicer` executable on `PATH`; `slice_tools.py` invokes it directly with `pentos_config.ini`.
+Slicing requires the external `prusa-slicer` executable on `PATH`; `services/slicing.py` invokes it directly with `pentos_config.ini`.
 
 ## Machine Mechanics Context
 
@@ -76,7 +77,7 @@ Use Ruff formatting and 4-space indentation. Prefer type annotations for public 
 
 ## Testing Guidelines
 
-This repository does not use an automated test suite. Validate changes manually with `uv run python main.py`, load a sample or uploaded model, exercise plane controls, run slicing when `prusa-slicer` is available, and inspect the generated files in `output/`. Use `uv run python -m compileall .` as a quick syntax check before handing off changes.
+Run `uv run pytest` for automated coverage. Validate visible or machine-facing changes manually with `uv run python main.py`, load a sample or uploaded model, exercise plane controls, run slicing when `prusa-slicer` is available, and inspect the generated files in `output/`. Use `uv run python -m compileall .` as a quick syntax check before handing off changes.
 
 ## Commit & Pull Request Guidelines
 

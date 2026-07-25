@@ -10,7 +10,7 @@ import gcode_tools
 from machine import BUILD_PLATE_CENTER, ROTATION_CENTER, rotation_matrix
 
 CONTINUATION_RESTART_EXTRA_MM = 0.25
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().with_name("pentos_config.ini")
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "pentos_config.ini"
 
 
 class SlicePlane(Protocol):
@@ -233,7 +233,7 @@ class Slicer:
 
         if print_up_normal is not None:
             transform = np.eye(4)
-            transform[:3, :3] = self.rotation_matrix(a_degrees, b_degrees)
+            transform[:3, :3] = rotation_matrix(a_degrees, b_degrees)
             transform = trimesh.transformations.transform_around(
                 transform,
                 self.rotation_center,
@@ -252,10 +252,6 @@ class Slicer:
             mesh.apply_translation([flat_xy_offset[0], flat_xy_offset[1], 0.0])
 
         return mesh, z_offset, flat_xy_offset, a_degrees, b_degrees
-
-    @staticmethod
-    def rotation_matrix(a_degrees: float, b_degrees: float) -> np.ndarray:
-        return rotation_matrix(a_degrees, b_degrees)
 
     @staticmethod
     def ab_angles(print_up_normal: np.ndarray | None) -> tuple[float, float]:

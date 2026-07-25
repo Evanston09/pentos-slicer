@@ -1,7 +1,12 @@
 import numpy as np
 import pytest
 
-from slice_tools import Slicer
+from services.slicing import DEFAULT_CONFIG_PATH, Slicer
+
+
+def test_default_config_path_points_to_repository_profile() -> None:
+    assert DEFAULT_CONFIG_PATH.name == "pentos_config.ini"
+    assert DEFAULT_CONFIG_PATH.is_file()
 
 
 @pytest.mark.parametrize(

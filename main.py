@@ -2,15 +2,15 @@ import time
 
 import viser
 
-from app import PentosApp
-from theming import add_build_plate_scene, configure_theme
+from controllers.app_controller import AppController
+from views.theming import add_build_plate_scene, configure_theme
 
 
 server = viser.ViserServer(label="Pentos")
 configure_theme(server)
 add_build_plate_scene(server)
 
-app = PentosApp(server)
+app = AppController(server)
 app.show_setup()
 
 print(f"Open your browser to http://localhost:{server.get_port()}")

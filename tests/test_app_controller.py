@@ -1,0 +1,32 @@
+from controllers.app_controller import AppController
+
+
+class FakeController:
+    def __init__(self, events: list[str], name: str) -> None:
+        self.events = events
+        self.name = name
+
+    def mount(self) -> None:
+        self.events.append(f"mount {self.name}")
+
+    def unmount(self) -> None:
+        self.events.append(f"unmount {self.name}")
+
+
+def test_navigation_mounts_each_screen_once_and_unmounts_previous() -> None:
+    events = []
+    app = AppController.__new__(AppController)
+    app.setup_controller = FakeController(events, "setup")
+    app.preview_controller = FakeController(events, "preview")
+    app.active_controller = None
+
+    app.show_setup()
+    app.show_setup()
+    app.show_preview()
+    app.show_preview()
+
+    assert events == [
+        "mount setup",
+        "unmount setup",
+        "mount preview",
+    ]
