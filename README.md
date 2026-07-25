@@ -7,6 +7,23 @@ and merging the generated G-code with Pentos A/B transition moves.
 The app uses [Viser](https://viser.studio/) for the browser-based 3D interface
 and `trimesh` for model loading and geometry operations.
 
+## Demo
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="docs/images/pentos-slicer-setup.jpg" alt="Pentos Slicer setup view with a model, slice plane, and transform gizmos">
+    </td>
+    <td width="50%">
+      <img src="docs/images/pentos-slicer-preview.jpg" alt="Pentos Slicer preview showing two oriented parts and generated G-code">
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><em>Place and orient interactive slice planes</em></td>
+    <td align="center"><em>Preview the generated multi-part toolpath</em></td>
+  </tr>
+</table>
+
 ## Requirements
 
 - Python 3.13
