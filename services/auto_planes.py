@@ -14,6 +14,7 @@ from services.slicing import (
 
 
 def _read_prusa_float(path: Path, key: str, fallback: float) -> float:
+    """Read a numeric PrusaSlicer setting, returning a fallback on failure."""
     try:
         for line in path.read_text().splitlines():
             setting, _, value = line.partition("=")
@@ -68,12 +69,15 @@ class AutoPlaneCandidate:
 
     @property
     def wxyz(self) -> np.ndarray:
+        """Return the quaternion that rotates print-up to the plane normal."""
         return _quaternion_from_z_to(self.normal)
 
     def offset(self) -> float:
+        """Return the plane's signed offset from the origin."""
         return float(self.normal @ self.position)
 
     def key(self) -> tuple[float, ...]:
+        """Return a rounded key used to identify equivalent planes."""
         return tuple(np.round([*self.normal, self.offset()], 4))
 
 
@@ -89,6 +93,7 @@ def overhang_preview_mesh(
     planes: list[SlicePlane],
     threshold_degrees: float,
 ) -> tuple[trimesh.Trimesh, np.ndarray]:
+    """Build a decomposed preview mesh and mark its overhanging faces."""
     # Split intersected triangles so highlighting changes exactly at each plane.
     pieces = decompose_mesh(mesh, planes, cap=False)
     overhang_masks = []
@@ -118,6 +123,7 @@ def _evaluate_state(
     planes: list[AutoPlaneCandidate],
     config: AutoPlaneConfig,
 ) -> _SearchState:
+    """Score a plane set by overhangs, surface quality, and reindexing cost."""
     mesh_pieces = decompose_mesh(mesh, planes, cap=False)
     total_surface_area = float(mesh.area)
 
@@ -170,9 +176,11 @@ def _evaluate_state(
 
 class AutoPlaneSelector:
     def __init__(self, config: AutoPlaneConfig | None = None) -> None:
+        """Initialize the selector with explicit or default search settings."""
         self.config = AutoPlaneConfig() if config is None else config
 
     def select(self, mesh: trimesh.Trimesh) -> list[AutoPlaneCandidate]:
+        """Use beam search to find the lowest-scoring set of slice planes."""
         if self.config.max_planes <= 0:
             return []
 
@@ -209,6 +217,7 @@ class AutoPlaneSelector:
         beam: list[_SearchState],
         candidates: list[AutoPlaneCandidate],
     ) -> list[_SearchState]:
+        """Extend each search state with every valid unused candidate plane."""
         expanded: list[_SearchState] = []
 
         for state in beam:
@@ -230,6 +239,7 @@ class AutoPlaneSelector:
         return expanded
 
     def generate_candidates(self, mesh: trimesh.Trimesh) -> list[AutoPlaneCandidate]:
+        """Generate unique slice planes that intersect the mesh safely."""
         candidates: list[AutoPlaneCandidate] = []
         seen: set[tuple[float, ...]] = set()
         mesh_center = mesh.bounds.mean(axis=0)
@@ -256,6 +266,7 @@ class AutoPlaneSelector:
         return candidates
 
     def candidate_normals(self) -> list[np.ndarray]:
+        """Sample unique plane normals within the machine's tilt limit."""
         normals = [
             np.array([0.0, 0.0, 1.0]),
             np.array([1.0, 0.0, 0.0]),
@@ -301,6 +312,7 @@ def _classify_piece_faces(
     floor_height: float,
     threshold_degrees: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Classify faces by print angle, bed contact, and overhang risk."""
     dots = np.clip(mesh.face_normals @ print_direction, -1.0, 1.0)
     face_heights = (mesh.vertices @ print_direction)[mesh.faces]
     floor_faces = np.all(
@@ -314,11 +326,13 @@ def _plane_intersection_has_bed_clearance(
     mesh: trimesh.Trimesh,
     plane: AutoPlaneCandidate,
 ) -> bool:
+    """Check that a plane intersects the mesh above the nozzle clearance."""
     lines = trimesh.intersections.mesh_plane(mesh, plane.normal, plane.position)
     return bool(len(lines) and lines[..., 2].min() >= BED_Z + NOZZLE_BED_CLEARANCE)
 
 
 def _normalize(vector: np.ndarray) -> np.ndarray:
+    """Return a unit-length copy of a non-zero vector."""
     vector = np.array(vector, dtype=float)
     norm = np.linalg.norm(vector)
     if np.isclose(norm, 0.0):
@@ -327,6 +341,7 @@ def _normalize(vector: np.ndarray) -> np.ndarray:
 
 
 def _quaternion_from_z_to(normal: np.ndarray) -> np.ndarray:
+    """Create a quaternion rotating the positive Z axis onto a normal."""
     normal = _normalize(normal)
     source = DEFAULT_PRINT_DIRECTION
     dot = float(np.clip(source @ normal, -1.0, 1.0))
@@ -347,6 +362,7 @@ def _quaternion_from_z_to(normal: np.ndarray) -> np.ndarray:
 def _plane_position(
     mesh_center: np.ndarray, normal: np.ndarray, offset: float
 ) -> np.ndarray:
+    """Find a point on an offset plane nearest the mesh center."""
     normal = _normalize(normal)
     return mesh_center + normal * (offset - float(mesh_center @ normal))
 
@@ -355,6 +371,7 @@ def _feature_offsets(
     projections: np.ndarray,
     limit: int,
 ) -> list[float]:
+    """Choose common interior vertex projections as candidate plane offsets."""
     rounded = np.round(projections.astype(float), decimals=4)
     values, counts = np.unique(rounded, return_counts=True)
     min_projection = float(values.min())
