@@ -18,6 +18,7 @@ class FakeSetupView:
         self.removed_plane_ids: list[int] = []
         self.debug_mode = False
         self.mounted = False
+        self.model_out_of_bounds = False
 
     def mount(self, state: AppState) -> None:
         self.mounted = True
@@ -36,6 +37,9 @@ class FakeSetupView:
 
     def show_overhang_faces(self, mesh, overhang_mask) -> None:
         pass
+
+    def set_model_out_of_bounds(self, out_of_bounds: bool) -> None:
+        self.model_out_of_bounds = out_of_bounds
 
     def set_model_controls_enabled(self, enabled: bool) -> None:
         pass
@@ -105,6 +109,22 @@ def test_upload_and_placement_update_state(monkeypatch) -> None:
     assert controller.state.model_z_degrees == 45.0
     assert view.mesh is mesh
     assert view.statuses[-1] == "Loaded uploaded"
+
+
+def test_model_turns_red_when_placement_leaves_build_volume() -> None:
+    mesh = trimesh.creation.box(extents=[10.0, 10.0, 10.0])
+    mesh.apply_translation([45.0, 45.0, 5.0])
+    state = AppState(current_model=(mesh, "box"))
+    controller, view, _, _ = make_controller(state)
+
+    controller.mount()
+    assert not view.model_out_of_bounds
+
+    controller.set_model_placement([86.0, 45.0])
+    assert view.model_out_of_bounds
+
+    controller.set_model_placement([45.0, 45.0])
+    assert not view.model_out_of_bounds
 
 
 def test_plane_changes_update_canonical_state_immediately() -> None:

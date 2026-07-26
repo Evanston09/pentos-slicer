@@ -374,6 +374,12 @@ class SetupView:
         self.model_overhang_handle.faces = mesh.faces[overhang_mask]
         self.model_overhang_handle.visible = bool(np.any(overhang_mask))
 
+    def set_model_out_of_bounds(self, out_of_bounds: bool) -> None:
+        if self.model_mesh_handle is not None:
+            self.model_mesh_handle.color = (
+                OVERHANG_RED if out_of_bounds else PENTOS_BLUE
+            )
+
     def show_full_model(self) -> None:
         if (
             self.model_vertices is None

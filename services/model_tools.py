@@ -4,7 +4,7 @@ import numpy as np
 import trimesh
 from trimesh import transformations as tf
 
-from machine import BUILD_PLATE_CENTER
+from machine import BUILD_PLATE_CENTER, BUILD_VOLUME_SIZE
 from models import AppState
 
 
@@ -87,3 +87,14 @@ def placed_model(state: AppState) -> tuple[trimesh.Trimesh, str] | None:
         ]
     )
     return mesh, source_name
+
+
+def model_within_build_volume(mesh: trimesh.Trimesh) -> bool:
+    lower, upper = mesh.bounds
+    volume_upper = np.asarray(BUILD_VOLUME_SIZE)
+    lower_inside = np.logical_or(lower >= 0.0, np.isclose(lower, 0.0))
+    upper_inside = np.logical_or(
+        upper <= volume_upper,
+        np.isclose(upper, volume_upper),
+    )
+    return bool(np.all(lower_inside) and np.all(upper_inside))

@@ -3,13 +3,14 @@ from pathlib import Path
 
 import numpy as np
 import viser
-from machine import BUILD_PLATE_CENTER, BUILD_PLATE_SIZE
+from machine import BUILD_PLATE_CENTER, BUILD_PLATE_SIZE, BUILD_VOLUME_SIZE
 from viser.theme import TitlebarButton, TitlebarConfig, TitlebarImage
 
 BUILD_PLATE_COLOR = (45, 45, 45)
 PENTOS_BLUE = (47, 153, 238)
 PENTOS_ORANGE = (255, 130, 0)
 OVERHANG_RED = (239, 68, 68)
+BUILD_VOLUME_COLOR = (120, 120, 120)
 
 
 def logo_to_data_url() -> str:
@@ -86,4 +87,36 @@ def add_build_plate_scene(server: viser.ViserServer) -> None:
         ),
         colors=PENTOS_ORANGE,
         line_width=2.0,
+    )
+
+    width, depth, height = BUILD_VOLUME_SIZE
+    corners = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [width, 0.0, 0.0],
+            [width, depth, 0.0],
+            [0.0, depth, 0.0],
+            [0.0, 0.0, height],
+            [width, 0.0, height],
+            [width, depth, height],
+            [0.0, depth, height],
+        ]
+    )
+    edge_indices = (
+        (0, 4),
+        (1, 5),
+        (2, 6),
+        (3, 7),
+        (4, 5),
+        (5, 6),
+        (6, 7),
+        (7, 4),
+    )
+    server.scene.add_line_segments(
+        "/shared/build_volume/outline",
+        points=np.array(
+            [[corners[start], corners[end]] for start, end in edge_indices]
+        ),
+        colors=BUILD_VOLUME_COLOR,
+        line_width=1.5,
     )

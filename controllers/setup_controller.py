@@ -15,6 +15,7 @@ from services.model_tools import (
     load_uploaded_model,
     model_center,
     model_frame_position,
+    model_within_build_volume,
     model_wxyz,
     placed_model,
 )
@@ -44,6 +45,8 @@ class SetupViewPort(Protocol):
         mesh: trimesh.Trimesh,
         overhang_mask: np.ndarray,
     ) -> None: ...
+
+    def set_model_out_of_bounds(self, out_of_bounds: bool) -> None: ...
 
     def set_model_controls_enabled(self, enabled: bool) -> None: ...
 
@@ -131,6 +134,7 @@ class SetupController:
             model_frame_position(self.state, mesh),
             model_wxyz(self.state),
         )
+        self._refresh_model_bounds()
         self.refresh_overhang_preview()
 
     def reset_model_placement(self) -> None:
@@ -306,6 +310,12 @@ class SetupController:
             model_frame_position(self.state, mesh),
             model_wxyz(self.state),
         )
+        self._refresh_model_bounds()
+
+    def _refresh_model_bounds(self) -> None:
+        model = placed_model(self.state)
+        if model is not None:
+            self.view.set_model_out_of_bounds(not model_within_build_volume(model[0]))
 
     def _assign_missing_plane_ids(self) -> None:
         used_ids = {

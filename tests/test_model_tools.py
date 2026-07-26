@@ -5,6 +5,7 @@ from models import AppState
 from services.model_tools import (
     load_model,
     normalize_mesh_units,
+    model_within_build_volume,
     placed_model,
 )
 
@@ -56,3 +57,17 @@ def test_placed_model_does_not_mutate_stored_mesh() -> None:
     assert name == "box"
     assert_allclose(placed.bounds.mean(axis=0)[:2], [20.0, 30.0])
     assert_allclose(base.vertices, original_vertices)
+
+
+def test_model_within_build_volume_checks_all_three_axes() -> None:
+    inside = trimesh.creation.box(extents=[10.0, 10.0, 10.0])
+    inside.apply_translation([45.0, 45.0, 5.0])
+    assert model_within_build_volume(inside)
+
+    outside_xy = inside.copy()
+    outside_xy.apply_translation([41.0, 0.0, 0.0])
+    assert not model_within_build_volume(outside_xy)
+
+    outside_z = inside.copy()
+    outside_z.apply_translation([0.0, 0.0, 86.0])
+    assert not model_within_build_volume(outside_z)
