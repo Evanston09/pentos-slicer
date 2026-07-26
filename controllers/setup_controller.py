@@ -9,8 +9,7 @@ from models import AppState, PlaneSnapshot
 from services.auto_planes import (
     AutoPlaneConfig,
     AutoPlaneSelector,
-    face_print_directions,
-    overhang_face_mask,
+    overhang_preview_mesh,
 )
 from services.model_tools import (
     load_uploaded_model,
@@ -40,7 +39,11 @@ class SetupViewPort(Protocol):
 
     def clear_model_scene(self) -> None: ...
 
-    def show_overhang_faces(self, overhang_mask: np.ndarray) -> None: ...
+    def show_overhang_faces(
+        self,
+        mesh: trimesh.Trimesh,
+        overhang_mask: np.ndarray,
+    ) -> None: ...
 
     def set_model_controls_enabled(self, enabled: bool) -> None: ...
 
@@ -180,14 +183,12 @@ class SetupController:
             return
 
         mesh, _ = model
-        directions = face_print_directions(mesh, self.state.plane_snapshots)
-        self.view.show_overhang_faces(
-            overhang_face_mask(
-                mesh,
-                directions,
-                self.overhang_threshold_degrees,
-            )
+        preview_mesh, overhang_mask = overhang_preview_mesh(
+            mesh,
+            self.state.plane_snapshots,
+            self.overhang_threshold_degrees,
         )
+        self.view.show_overhang_faces(preview_mesh, overhang_mask)
 
     def select_auto_planes(self, max_planes: int) -> None:
         model = placed_model(self.state)

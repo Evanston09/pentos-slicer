@@ -10,7 +10,6 @@ from services.slicing import (
     SlicePlane,
     Slicer,
     decompose_mesh,
-    plane_normal,
 )
 
 
@@ -30,6 +29,7 @@ DEFAULT_PRINT_DIRECTION = np.array([0.0, 0.0, 1.0])
 EPSILON = 1e-9
 BED_Z = 0.0
 BED_CONTACT_TOLERANCE = 1e-6
+NOZZLE_BED_CLEARANCE = 5.0
 OVERHANG_WEIGHT = 0.67
 QUALITY_WEIGHT = 0.24
 REINDEX_WEIGHT = 0.07
@@ -84,35 +84,32 @@ class _SearchState:
     chunk_count: int
 
 
-def face_print_directions(
+def overhang_preview_mesh(
     mesh: trimesh.Trimesh,
     planes: list[SlicePlane],
-) -> np.ndarray:
-    directions = np.tile(DEFAULT_PRINT_DIRECTION, (len(mesh.faces), 1))
-    for plane in planes:
-        normal = plane_normal(plane)
-        normal_side = (mesh.triangles_center - plane.position) @ normal >= 0.0
-        directions[normal_side] = normal
-    return directions
-
-
-def overhang_face_mask(
-    mesh: trimesh.Trimesh,
-    print_directions: np.ndarray | None,
     threshold_degrees: float,
-) -> np.ndarray:
-    directions = np.asarray(
-        DEFAULT_PRINT_DIRECTION if print_directions is None else print_directions,
-        dtype=float,
-    )
-    directions = directions / np.linalg.norm(directions, axis=-1, keepdims=True)
-    dots = np.clip(
-        np.sum(mesh.face_normals * directions, axis=1),
-        -1.0,
-        1.0,
-    )
-    return (dots + np.sin(np.radians(threshold_degrees)) < 0.0) & ~_bed_contact_faces(
-        mesh, BED_Z, BED_CONTACT_TOLERANCE
+) -> tuple[trimesh.Trimesh, np.ndarray]:
+    # Split intersected triangles so highlighting changes exactly at each plane.
+    pieces = decompose_mesh(mesh, planes, cap=False)
+    overhang_masks = []
+
+    for piece in pieces:
+        normal = piece.print_up_normal
+        direction = DEFAULT_PRINT_DIRECTION if normal is None else _normalize(normal)
+        floor_height = (
+            BED_Z if normal is None else float((piece.mesh.vertices @ direction).min())
+        )
+        _, _, overhangs = _classify_piece_faces(
+            piece.mesh,
+            direction,
+            floor_height,
+            threshold_degrees,
+        )
+        overhang_masks.append(overhangs)
+
+    return (
+        trimesh.util.concatenate([piece.mesh for piece in pieces]),
+        np.concatenate(overhang_masks),
     )
 
 
@@ -123,7 +120,6 @@ def _evaluate_state(
 ) -> _SearchState:
     mesh_pieces = decompose_mesh(mesh, planes, cap=False)
     total_surface_area = float(mesh.area)
-    overhang_threshold_radians = np.radians(config.overhang_threshold_degrees)
 
     overhang_area = 0.0
     quality = 0.0
@@ -134,18 +130,17 @@ def _evaluate_state(
             if piece.print_up_normal is None
             else _normalize(piece.print_up_normal)
         )
-        face_normals = piece.mesh.face_normals
         face_areas = piece.mesh.area_faces
-
-        dots = np.clip(face_normals @ direction, -1.0, 1.0)
-        bed_supported = _bed_contact_faces(
+        floor_height = BED_Z
+        if piece.print_up_normal is not None:
+            floor_height = float((piece.mesh.vertices @ direction).min())
+        dots, bed_supported, risky = _classify_piece_faces(
             piece.mesh,
-            BED_Z,
-            BED_CONTACT_TOLERANCE,
+            direction,
+            floor_height,
+            config.overhang_threshold_degrees,
         )
 
-        # Boolean mask of risky faces
-        risky = (dots + np.sin(overhang_threshold_radians) < 0.0) & ~bed_supported
         overhang_area += float(face_areas[risky].sum())
 
         quality_faces = ~bed_supported
@@ -253,6 +248,8 @@ class AutoPlaneSelector:
                 if key in seen:
                     continue
                 seen.add(key)
+                if not _plane_intersection_has_bed_clearance(mesh, candidate):
+                    continue
                 if len(decompose_mesh(mesh, [candidate], False)) >= 2:
                     candidates.append(candidate)
 
@@ -298,15 +295,27 @@ class AutoPlaneSelector:
         return allowed
 
 
-# Get faces touching the bed
-def _bed_contact_faces(
-    mesh: trimesh.Trimesh, bed_z: float, tolerance: float
-) -> np.ndarray:
-    if len(mesh.faces) == 0:
-        return np.zeros(0, dtype=bool)
+def _classify_piece_faces(
+    mesh: trimesh.Trimesh,
+    print_direction: np.ndarray,
+    floor_height: float,
+    threshold_degrees: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    dots = np.clip(mesh.face_normals @ print_direction, -1.0, 1.0)
+    face_heights = (mesh.vertices @ print_direction)[mesh.faces]
+    floor_faces = np.all(
+        np.isclose(face_heights, floor_height, atol=BED_CONTACT_TOLERANCE), axis=1
+    )
+    overhangs = (dots + np.sin(np.radians(threshold_degrees)) < 0.0) & ~floor_faces
+    return dots, floor_faces, overhangs
 
-    face_z = mesh.vertices[mesh.faces][:, :, 2]
-    return np.all(np.isclose(face_z, bed_z, atol=tolerance), axis=1)
+
+def _plane_intersection_has_bed_clearance(
+    mesh: trimesh.Trimesh,
+    plane: AutoPlaneCandidate,
+) -> bool:
+    lines = trimesh.intersections.mesh_plane(mesh, plane.normal, plane.position)
+    return bool(len(lines) and lines[..., 2].min() >= BED_Z + NOZZLE_BED_CLEARANCE)
 
 
 def _normalize(vector: np.ndarray) -> np.ndarray:

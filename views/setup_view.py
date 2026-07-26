@@ -25,6 +25,7 @@ class SetupView:
         self.model_mesh_handle: Any | None = None
         self.model_overhang_handle: Any | None = None
         self.model_gizmo_handle: Any | None = None
+        self.model_vertices: np.ndarray | None = None
         self.model_faces: np.ndarray | None = None
         self.model_folder: Any | None = None
         self.model_x_position: Any | None = None
@@ -258,6 +259,7 @@ class SetupView:
         wxyz: np.ndarray,
     ) -> None:
         self.clear_model_scene()
+        self.model_vertices = mesh.vertices - center
         self.model_faces = mesh.faces
         self.model_frame_handle = self.server.scene.add_frame(
             "/setup/model",
@@ -267,7 +269,7 @@ class SetupView:
         )
         self.model_mesh_handle = self.server.scene.add_mesh_simple(
             "/setup/model/mesh",
-            vertices=mesh.vertices - center,
+            vertices=self.model_vertices,
             faces=mesh.faces,
             color=PENTOS_BLUE,
             opacity=0.45,
@@ -275,7 +277,7 @@ class SetupView:
         )
         self.model_overhang_handle = self.server.scene.add_mesh_simple(
             "/setup/model/overhangs",
-            vertices=mesh.vertices - center,
+            vertices=self.model_vertices,
             faces=np.empty((0, 3)),
             color=OVERHANG_RED,
             opacity=0.85,
@@ -317,6 +319,7 @@ class SetupView:
         self.model_overhang_handle = None
         self.model_mesh_handle = None
         self.model_frame_handle = None
+        self.model_vertices = None
         self.model_faces = None
 
     def set_model_controls_enabled(self, enabled: bool) -> None:
@@ -347,24 +350,39 @@ class SetupView:
             self.model_gizmo_handle.position = position
         self._sync_model_controls(xy_position, z_degrees)
 
-    def show_overhang_faces(self, overhang_mask: np.ndarray) -> None:
+    def show_overhang_faces(
+        self,
+        mesh: trimesh.Trimesh,
+        overhang_mask: np.ndarray,
+    ) -> None:
         if (
             not self.show_overhangs_enabled
-            or self.model_faces is None
+            or self.model_frame_handle is None
             or self.model_mesh_handle is None
             or self.model_overhang_handle is None
         ):
             self.show_full_model()
             return
 
-        self.model_mesh_handle.faces = self.model_faces[~overhang_mask]
-        self.model_overhang_handle.faces = self.model_faces[overhang_mask]
+        rotation = trimesh.transformations.quaternion_matrix(
+            self.model_frame_handle.wxyz
+        )[:3, :3]
+        vertices = (mesh.vertices - self.model_frame_handle.position) @ rotation
+        self.model_mesh_handle.vertices = vertices
+        self.model_mesh_handle.faces = mesh.faces[~overhang_mask]
+        self.model_overhang_handle.vertices = vertices
+        self.model_overhang_handle.faces = mesh.faces[overhang_mask]
         self.model_overhang_handle.visible = bool(np.any(overhang_mask))
 
     def show_full_model(self) -> None:
-        if self.model_faces is None or self.model_mesh_handle is None:
+        if (
+            self.model_vertices is None
+            or self.model_faces is None
+            or self.model_mesh_handle is None
+        ):
             return
 
+        self.model_mesh_handle.vertices = self.model_vertices
         self.model_mesh_handle.faces = self.model_faces
         if self.model_overhang_handle is not None:
             self.model_overhang_handle.visible = False
