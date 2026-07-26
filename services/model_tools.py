@@ -62,7 +62,7 @@ def model_frame_position(state: AppState, mesh: trimesh.Trimesh) -> np.ndarray:
     return np.array([xy_position[0], xy_position[1], center[2]])
 
 
-def placed_model(state: AppState) -> tuple[trimesh.Trimesh, str] | None:
+def transformed_model(state: AppState) -> tuple[trimesh.Trimesh, str] | None:
     if state.current_model is None:
         return None
 

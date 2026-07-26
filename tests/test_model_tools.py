@@ -6,7 +6,7 @@ from services.model_tools import (
     load_model,
     normalize_mesh_units,
     model_within_build_volume,
-    placed_model,
+    transformed_model,
 )
 
 
@@ -40,7 +40,7 @@ def test_load_model_centers_on_plate_and_places_base_at_zero(tmp_path) -> None:
     assert mesh.bounds[0][2] == 0.0
 
 
-def test_placed_model_does_not_mutate_stored_mesh() -> None:
+def test_transformed_model_does_not_mutate_stored_mesh() -> None:
     base = trimesh.creation.box(extents=[10.0, 20.0, 30.0])
     base.apply_translation([45.0, 45.0, 15.0])
     original_vertices = base.vertices.copy()
@@ -50,7 +50,7 @@ def test_placed_model_does_not_mutate_stored_mesh() -> None:
         model_z_degrees=90.0,
     )
 
-    result = placed_model(state)
+    result = transformed_model(state)
 
     assert result is not None
     placed, name = result

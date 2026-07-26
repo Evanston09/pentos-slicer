@@ -17,7 +17,7 @@ from services.model_tools import (
     model_frame_position,
     model_within_build_volume,
     model_wxyz,
-    placed_model,
+    transformed_model,
 )
 from services.project_io import load_scene, save_scene
 from services.slicing import Slicer
@@ -182,7 +182,7 @@ class SetupController:
         self.state.debug_mode = enabled
 
     def refresh_overhang_preview(self) -> None:
-        model = placed_model(self.state)
+        model = transformed_model(self.state)
         if model is None:
             return
 
@@ -195,7 +195,7 @@ class SetupController:
         self.view.show_overhang_faces(preview_mesh, overhang_mask)
 
     def select_auto_planes(self, max_planes: int) -> None:
-        model = placed_model(self.state)
+        model = transformed_model(self.state)
         if model is None:
             self.view.set_status("Load a model before selecting planes")
             return
@@ -244,7 +244,7 @@ class SetupController:
         return filename, scene_bytes
 
     def slice_model(self) -> None:
-        model = placed_model(self.state)
+        model = transformed_model(self.state)
         if model is None:
             self.view.set_status("Load a model before slicing")
             return
@@ -313,7 +313,7 @@ class SetupController:
         self._refresh_model_bounds()
 
     def _refresh_model_bounds(self) -> None:
-        model = placed_model(self.state)
+        model = transformed_model(self.state)
         if model is not None:
             self.view.set_model_out_of_bounds(not model_within_build_volume(model[0]))
 
