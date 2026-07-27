@@ -43,3 +43,13 @@ def test_close_unmounts_active_controller() -> None:
 
     assert events == ["unmount active"]
     assert app.active_controller is None
+
+
+def test_app_uses_workspace_for_all_runtime_files(tmp_path) -> None:
+    app = AppController(object(), tmp_path)
+
+    assert app.setup_controller.upload_dir == tmp_path / "uploads"
+    assert app.slicer.temp_dir == tmp_path / "temp"
+    assert app.slicer.out_dir == tmp_path / "output"
+    assert app.slicer.temp_dir.is_dir()
+    assert app.slicer.out_dir.is_dir()

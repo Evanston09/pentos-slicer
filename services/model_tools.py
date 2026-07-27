@@ -35,10 +35,10 @@ def load_model(path: Path) -> trimesh.Trimesh:
 def load_uploaded_model(
     name: str,
     content: bytes,
-    upload_dir: Path = Path("uploaded_models"),
+    upload_dir: Path,
 ) -> tuple[trimesh.Trimesh, str]:
-    upload_dir.mkdir(exist_ok=True)
-    path = upload_dir / name
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    path = upload_dir / Path(name).name
     path.write_bytes(content)
     return load_model(path), path.stem
 

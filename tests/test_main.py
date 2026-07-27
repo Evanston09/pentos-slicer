@@ -15,8 +15,9 @@ class FakeServer:
 
 
 class FakeApp:
-    def __init__(self, client) -> None:
+    def __init__(self, client, workspace) -> None:
         self.client = client
+        self.workspace = workspace
         self.state = object()
         self.shown = False
         self.closed = False
@@ -43,11 +44,17 @@ def test_client_connections_have_independent_apps(monkeypatch) -> None:
     asyncio.run(server.connect(second_client))
 
     assert sessions[1] is not sessions[2]
-    assert sessions[1].state is not sessions[2].state
-    assert sessions[1].shown
-    assert sessions[2].shown
+    assert sessions[1].app.state is not sessions[2].app.state
+    assert sessions[1].app.workspace != sessions[2].app.workspace
+    assert sessions[1].app.workspace.is_dir()
+    assert sessions[2].app.workspace.is_dir()
+    assert sessions[1].app.shown
+    assert sessions[2].app.shown
     assert themed_clients == [first_client, second_client]
     assert scene_clients == [first_client, second_client]
+
+    asyncio.run(server.disconnect(first_client))
+    asyncio.run(server.disconnect(second_client))
 
 
 def test_disconnect_closes_only_matching_client_app(monkeypatch) -> None:
@@ -60,11 +67,18 @@ def test_disconnect_closes_only_matching_client_app(monkeypatch) -> None:
     second_client = SimpleNamespace(client_id=2)
     asyncio.run(server.connect(first_client))
     asyncio.run(server.connect(second_client))
-    first_app = sessions[1]
-    second_app = sessions[2]
+    first_session = sessions[1]
+    second_session = sessions[2]
+    first_workspace = first_session.app.workspace
+    second_workspace = second_session.app.workspace
+    (first_workspace / "uploaded.stl").write_bytes(b"model")
 
     asyncio.run(server.disconnect(first_client))
 
-    assert first_app.closed
-    assert not second_app.closed
-    assert sessions == {2: second_app}
+    assert first_session.app.closed
+    assert not second_session.app.closed
+    assert not first_workspace.exists()
+    assert second_workspace.exists()
+    assert sessions == {2: second_session}
+
+    asyncio.run(server.disconnect(second_client))

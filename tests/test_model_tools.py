@@ -1,9 +1,11 @@
 from numpy.testing import assert_allclose
 import trimesh
 
+import services.model_tools as model_tools_module
 from models import AppState
 from services.model_tools import (
     load_model,
+    load_uploaded_model,
     normalize_mesh_units,
     model_within_build_volume,
     transformed_model,
@@ -38,6 +40,40 @@ def test_load_model_centers_on_plate_and_places_base_at_zero(tmp_path) -> None:
 
     assert_allclose(mesh.bounds.mean(axis=0)[:2], [45.0, 45.0])
     assert mesh.bounds[0][2] == 0.0
+
+
+def test_uploaded_model_stays_in_its_workspace(monkeypatch, tmp_path) -> None:
+    loaded_paths = []
+    mesh = trimesh.creation.box()
+
+    def fake_load_model(path):
+        loaded_paths.append(path)
+        return mesh
+
+    monkeypatch.setattr(model_tools_module, "load_model", fake_load_model)
+    first_uploads = tmp_path / "first" / "uploads"
+    second_uploads = tmp_path / "second" / "uploads"
+
+    first_mesh, first_name = load_uploaded_model(
+        "../shared.stl",
+        b"first",
+        first_uploads,
+    )
+    second_mesh, second_name = load_uploaded_model(
+        "/shared.stl",
+        b"second",
+        second_uploads,
+    )
+
+    assert first_mesh is mesh
+    assert second_mesh is mesh
+    assert first_name == second_name == "shared"
+    assert loaded_paths == [
+        first_uploads / "shared.stl",
+        second_uploads / "shared.stl",
+    ]
+    assert (first_uploads / "shared.stl").read_bytes() == b"first"
+    assert (second_uploads / "shared.stl").read_bytes() == b"second"
 
 
 def test_transformed_model_does_not_mutate_stored_mesh() -> None:

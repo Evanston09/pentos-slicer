@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any, Protocol
 
 from controllers.preview_controller import PreviewController
@@ -15,9 +16,12 @@ class SceneController(Protocol):
 
 
 class AppController:
-    def __init__(self, client: Any) -> None:
+    def __init__(self, client: Any, workspace: Path) -> None:
         self.state = AppState(model_xy_position=BUILD_PLATE_CENTER[:2])
-        self.slicer = Slicer()
+        self.slicer = Slicer(
+            out_dir=workspace / "output",
+            temp_dir=workspace / "temp",
+        )
         self.setup_view = SetupView(client)
         self.preview_view = PreviewView(client)
         self.setup_controller = SetupController(
@@ -25,6 +29,7 @@ class AppController:
             self.slicer,
             self.setup_view,
             self.show_preview,
+            workspace / "uploads",
         )
         self.preview_controller = PreviewController(
             self.state,

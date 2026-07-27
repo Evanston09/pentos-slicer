@@ -79,7 +79,10 @@ class FakeSlicer:
         return Path("output/model_debug.gcode")
 
 
-def make_controller(state: AppState | None = None):
+def make_controller(
+    state: AppState | None = None,
+    upload_dir: Path = Path("uploads"),
+):
     view = FakeSetupView()
     slicer = FakeSlicer()
     navigations = []
@@ -88,18 +91,24 @@ def make_controller(state: AppState | None = None):
         slicer,
         view,
         lambda: navigations.append("preview"),
+        upload_dir,
     )
     return controller, view, slicer, navigations
 
 
-def test_upload_and_placement_update_state(monkeypatch) -> None:
+def test_upload_and_placement_update_state(monkeypatch, tmp_path) -> None:
     mesh = trimesh.creation.box()
+
+    def load_model(name, content, upload_dir):
+        assert upload_dir == tmp_path
+        return mesh, "uploaded"
+
     monkeypatch.setattr(
         setup_controller_module,
         "load_uploaded_model",
-        lambda name, content: (mesh, "uploaded"),
+        load_model,
     )
-    controller, view, _, _ = make_controller()
+    controller, view, _, _ = make_controller(upload_dir=tmp_path)
 
     controller.handle_upload("uploaded.stl", b"mesh")
     controller.set_model_placement([12.0, 34.0], 45.0)

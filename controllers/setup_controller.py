@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from pathlib import Path
 from typing import Protocol
 
 import numpy as np
@@ -74,11 +75,13 @@ class SetupController:
         slicer: Slicer,
         view: SetupViewPort,
         show_preview: Callable[[], None],
+        upload_dir: Path,
     ) -> None:
         self.state = state
         self.slicer = slicer
         self.view = view
         self.show_preview = show_preview
+        self.upload_dir = upload_dir
         self.overhang_threshold_degrees = AutoPlaneConfig().overhang_threshold_degrees
         self.next_plane_id = 0
         self._assign_missing_plane_ids()
@@ -103,7 +106,7 @@ class SetupController:
             return
 
         try:
-            mesh, source_name = load_uploaded_model(name, content)
+            mesh, source_name = load_uploaded_model(name, content, self.upload_dir)
             self.state.current_model = (mesh, source_name)
             self.state.model_xy_position = BUILD_PLATE_CENTER[:2]
             self.state.model_z_degrees = 0.0
