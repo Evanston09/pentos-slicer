@@ -68,7 +68,7 @@ Sample models are available in `samples/`.
 - `controllers/` coordinates setup, preview, slicing, export, and navigation.
 - `views/` contains the Viser UI, scene rendering, plane editor, and theme.
 - `services/` contains model/project I/O, preview parsing, auto-plane selection,
-  slicing, and Moonraker integration.
+  and slicing.
 - `gcode_tools/` trims and merges generated G-code with Pentos transitions.
 - `machine.py` stores machine geometry constants.
 - `samples/` contains example models and saved Pentos scenes.

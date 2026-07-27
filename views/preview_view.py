@@ -24,8 +24,7 @@ class PreviewView:
         self.line_width: Any | None = None
         self.back_button: Any | None = None
         self.setup_handle: Any | None = None
-        self.send_handle: Any | None = None
-        self.send_print_handle: Any | None = None
+        self.download_handle: Any | None = None
         self.travel_handles: list[Any] = []
         self.extrusion_handles: list[Any] = []
 
@@ -40,7 +39,7 @@ class PreviewView:
         )
         self.output_path = self.client.gui.add_text(
             "Output G-code",
-            "" if gcode_path is None else str(gcode_path),
+            "" if gcode_path is None else gcode_path.name,
             disabled=True,
         )
         self.show_travel = self.client.gui.add_checkbox("Travel", True)
@@ -50,13 +49,9 @@ class PreviewView:
             min=1.0,
             max=10.0,
         )
-        self.send_handle = self.client.gui.add_button(
-            "Send to Moonraker",
-            icon=viser.Icon.UPLOAD,
-        )
-        self.send_print_handle = self.client.gui.add_button(
-            "Send and Print",
-            icon=viser.Icon.PLAYER_PLAY,
+        self.download_handle = self.client.gui.add_button(
+            "Download G-code",
+            icon=viser.Icon.DOWNLOAD,
         )
         self.back_button = self.client.gui.add_button("Back to Setup")
 
@@ -83,15 +78,20 @@ class PreviewView:
             if self.controller is not None:
                 self.controller.show_setup()
 
-        @self.send_handle.on_click
-        def _(_) -> None:
-            if self.controller is not None:
-                self.controller.send_to_moonraker(start_print=False)
-
-        @self.send_print_handle.on_click
-        def _(_) -> None:
-            if self.controller is not None:
-                self.controller.send_to_moonraker(start_print=True)
+        @self.download_handle.on_click
+        def _(event) -> None:
+            if self.controller is None:
+                return
+            download = self.controller.download_gcode()
+            if download is None:
+                return
+            filename, content = download
+            assert event.client is not None
+            event.client.send_file_download(
+                filename,
+                content,
+                save_immediately=True,
+            )
 
     def set_status(self, message: str) -> None:
         if self.status is not None:
@@ -142,8 +142,7 @@ class PreviewView:
             self.back_button,
             self.line_width,
             self.show_travel,
-            self.send_print_handle,
-            self.send_handle,
+            self.download_handle,
             self.output_path,
             self.status,
         ):
@@ -155,8 +154,7 @@ class PreviewView:
         self.show_travel = None
         self.line_width = None
         self.back_button = None
-        self.send_handle = None
-        self.send_print_handle = None
+        self.download_handle = None
         self.setup_handle = None
         self.travel_handles = []
         self.extrusion_handles = []
