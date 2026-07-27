@@ -50,6 +50,9 @@ Open the URL printed in the terminal, usually:
 http://localhost:8080
 ```
 
+At most two models are sliced concurrently by default. Set
+`MAX_CONCURRENT_SLICES` to a positive integer to change that limit.
+
 ## Basic Workflow
 
 1. Upload a model (`.stl`, `.3mf`, `.obj`, or `.ply`).

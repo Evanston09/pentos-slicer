@@ -1,6 +1,7 @@
 import io
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import zipfile
 
 import numpy as np
@@ -85,7 +86,8 @@ def test_scene_round_trip_preserves_version_one_and_omits_plane_ids() -> None:
         FakeSlicer(),
         FakeSetupView(),
         lambda: None,
-        Path("uploads"),
+        SimpleNamespace(path=Path(".")),
+        object(),
     )
     assert loaded.plane_snapshots[0].plane_id == 0
 

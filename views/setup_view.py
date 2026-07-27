@@ -251,6 +251,10 @@ class SetupView:
         if self.status is not None:
             self.status.value = message
 
+    def set_slice_enabled(self, enabled: bool) -> None:
+        if self.slice_button is not None:
+            self.slice_button.disabled = not enabled
+
     def show_mesh(
         self,
         mesh: trimesh.Trimesh,

@@ -1,6 +1,8 @@
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 import main
 
 
@@ -15,9 +17,10 @@ class FakeServer:
 
 
 class FakeApp:
-    def __init__(self, client, workspace) -> None:
+    def __init__(self, client, workspace, slicing_coordinator) -> None:
         self.client = client
-        self.workspace = workspace
+        self.workspace = workspace.path
+        self.slicing_coordinator = slicing_coordinator
         self.state = object()
         self.shown = False
         self.closed = False
@@ -30,6 +33,7 @@ class FakeApp:
 
 
 def test_client_connections_have_independent_apps(monkeypatch) -> None:
+    monkeypatch.delenv("MAX_CONCURRENT_SLICES", raising=False)
     themed_clients = []
     scene_clients = []
     monkeypatch.setattr(main, "AppController", FakeApp)
@@ -48,6 +52,7 @@ def test_client_connections_have_independent_apps(monkeypatch) -> None:
     assert sessions[1].app.workspace != sessions[2].app.workspace
     assert sessions[1].app.workspace.is_dir()
     assert sessions[2].app.workspace.is_dir()
+    assert sessions[1].app.slicing_coordinator is sessions[2].app.slicing_coordinator
     assert sessions[1].app.shown
     assert sessions[2].app.shown
     assert themed_clients == [first_client, second_client]
@@ -58,6 +63,7 @@ def test_client_connections_have_independent_apps(monkeypatch) -> None:
 
 
 def test_disconnect_closes_only_matching_client_app(monkeypatch) -> None:
+    monkeypatch.delenv("MAX_CONCURRENT_SLICES", raising=False)
     monkeypatch.setattr(main, "AppController", FakeApp)
     monkeypatch.setattr(main, "configure_theme", lambda client: None)
     monkeypatch.setattr(main, "add_build_plate_scene", lambda client: None)
@@ -82,3 +88,19 @@ def test_disconnect_closes_only_matching_client_app(monkeypatch) -> None:
     assert sessions == {2: second_session}
 
     asyncio.run(server.disconnect(second_client))
+
+
+def test_concurrency_limit_comes_from_environment(monkeypatch) -> None:
+    monkeypatch.setenv("MAX_CONCURRENT_SLICES", "4")
+
+    assert main.max_concurrent_slices() == 4
+
+
+def test_concurrency_limit_rejects_invalid_environment(monkeypatch) -> None:
+    monkeypatch.setenv("MAX_CONCURRENT_SLICES", "0")
+
+    with pytest.raises(
+        ValueError,
+        match="MAX_CONCURRENT_SLICES must be at least 1",
+    ):
+        main.max_concurrent_slices()

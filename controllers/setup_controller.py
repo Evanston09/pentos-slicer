@@ -1,5 +1,4 @@
 from collections.abc import Callable
-from pathlib import Path
 from typing import Protocol
 
 import numpy as np
@@ -21,6 +20,8 @@ from services.model_tools import (
     transformed_model,
 )
 from services.project_io import load_scene, save_scene
+from services.session_workspace import SessionWorkspace
+from services.slice_jobs import SlicingBusyError, SlicingCoordinator
 from services.slicing import Slicer
 
 
@@ -30,6 +31,8 @@ class SetupViewPort(Protocol):
     def unmount(self) -> None: ...
 
     def set_status(self, message: str) -> None: ...
+
+    def set_slice_enabled(self, enabled: bool) -> None: ...
 
     def show_mesh(
         self,
@@ -75,13 +78,16 @@ class SetupController:
         slicer: Slicer,
         view: SetupViewPort,
         show_preview: Callable[[], None],
-        upload_dir: Path,
+        workspace: SessionWorkspace,
+        slicing_coordinator: SlicingCoordinator,
     ) -> None:
         self.state = state
         self.slicer = slicer
         self.view = view
         self.show_preview = show_preview
-        self.upload_dir = upload_dir
+        self.workspace = workspace
+        self.upload_dir = workspace.path / "uploads"
+        self.slicing_coordinator = slicing_coordinator
         self.overhang_threshold_degrees = AutoPlaneConfig().overhang_threshold_degrees
         self.next_plane_id = 0
         self._assign_missing_plane_ids()
@@ -253,28 +259,36 @@ class SetupController:
             return
 
         mesh, source_name = model
+        self.view.set_slice_enabled(False)
         try:
-            self.view.set_status(
-                "Generating debug transition check..."
-                if self.state.debug_mode
-                else "Slicing..."
-            )
-            if self.state.debug_mode:
-                output_path = self.slicer.debug_transition_check(
-                    mesh,
-                    self.state.plane_snapshots,
-                    source_name,
-                )
-            else:
-                output_path = self.slicer.slice(
-                    mesh,
-                    self.state.plane_snapshots,
-                    source_name,
-                )
+            with self.workspace.active_job():
+                with self.slicing_coordinator.slot():
+                    self.view.set_status(
+                        "Generating debug transition check..."
+                        if self.state.debug_mode
+                        else "Slicing..."
+                    )
+                    if self.state.debug_mode:
+                        output_path = self.slicer.debug_transition_check(
+                            mesh,
+                            self.state.plane_snapshots,
+                            source_name,
+                        )
+                    else:
+                        output_path = self.slicer.slice(
+                            mesh,
+                            self.state.plane_snapshots,
+                            source_name,
+                        )
+        except SlicingBusyError as exc:
+            self.view.set_status(str(exc))
+            return
         except Exception as exc:
             self.view.set_status(f"Failed to slice: {exc}")
             print(f"Failed to slice: {exc}")
             return
+        finally:
+            self.view.set_slice_enabled(True)
 
         self.state.gcode_path = output_path
         self.show_preview()

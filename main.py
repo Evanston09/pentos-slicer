@@ -1,42 +1,53 @@
 from dataclasses import dataclass
-from pathlib import Path
-import tempfile
+import os
 
 import viser
 
 from controllers.app_controller import AppController
+from services.session_workspace import SessionWorkspace
+from services.slice_jobs import SlicingCoordinator
 from views.theming import add_build_plate_scene, configure_theme
 
 
 @dataclass
 class ClientSession:
     app: AppController
-    temporary_directory: tempfile.TemporaryDirectory[str]
+    workspace: SessionWorkspace
 
     def close(self) -> None:
         try:
             self.app.close()
         finally:
-            self.temporary_directory.cleanup()
+            self.workspace.close()
+
+
+def max_concurrent_slices() -> int:
+    try:
+        value = int(os.getenv("MAX_CONCURRENT_SLICES", "2"))
+    except ValueError as exc:
+        raise ValueError("MAX_CONCURRENT_SLICES must be an integer") from exc
+    if value < 1:
+        raise ValueError("MAX_CONCURRENT_SLICES must be at least 1")
+    return value
 
 
 def register_client_sessions(
     server: viser.ViserServer,
 ) -> dict[int, ClientSession]:
-    runtime_dir = Path(tempfile.gettempdir()) / "pentos-slicer"
-    runtime_dir.mkdir(parents=True, exist_ok=True)
+    slicing_coordinator = SlicingCoordinator(max_concurrent_slices())
     sessions: dict[int, ClientSession] = {}
 
     @server.on_client_connect
     async def _(client: viser.ClientHandle) -> None:
         configure_theme(client)
         add_build_plate_scene(client)
-        temporary_directory = tempfile.TemporaryDirectory(
-            prefix=f"{client.client_id}-",
-            dir=runtime_dir,
-        )
-        app = AppController(client, Path(temporary_directory.name))
-        session = ClientSession(app, temporary_directory)
+        workspace = SessionWorkspace(client.client_id)
+        try:
+            app = AppController(client, workspace, slicing_coordinator)
+        except Exception:
+            workspace.close()
+            raise
+        session = ClientSession(app, workspace)
         sessions[client.client_id] = session
         try:
             app.show_setup()
