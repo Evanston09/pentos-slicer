@@ -30,3 +30,16 @@ def test_navigation_mounts_each_screen_once_and_unmounts_previous() -> None:
         "unmount setup",
         "mount preview",
     ]
+
+
+def test_close_unmounts_active_controller() -> None:
+    events = []
+    app = AppController.__new__(AppController)
+    active = FakeController(events, "active")
+    app.active_controller = active
+
+    app.close()
+    app.close()
+
+    assert events == ["unmount active"]
+    assert app.active_controller is None

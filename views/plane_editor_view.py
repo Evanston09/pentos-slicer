@@ -3,7 +3,7 @@ from typing import Any, Callable
 
 import numpy as np
 from trimesh import transformations as tf
-from viser import ViserServer
+from viser import ClientHandle
 
 from models import PlaneSnapshot
 from views.theming import PENTOS_BLUE, PENTOS_ORANGE
@@ -36,13 +36,13 @@ class PlaneState:
 class PlaneEditorView:
     def __init__(
         self,
-        server: ViserServer,
+        client: ClientHandle,
         on_plane_changed: Callable[[int, np.ndarray, np.ndarray], None],
         on_plane_deleted: Callable[[int], None],
         gui_container: Any | None = None,
         scene_prefix: str = "/planes",
     ):
-        self.server = server
+        self.client = client
         self.on_plane_changed = on_plane_changed
         self.on_plane_deleted = on_plane_deleted
         self.gui_container = gui_container
@@ -55,16 +55,16 @@ class PlaneEditorView:
             raise ValueError("PlaneSnapshot requires a plane_id")
         plane_id = plane.plane_id
 
-        pose = self.server.scene.add_frame(
+        pose = self.client.scene.add_frame(
             f"{self.scene_prefix}/{plane_id}/pose",
             position=plane.position,
             wxyz=self._normalize_quaternion(plane.wxyz),
         )
-        anchor = self.server.scene.add_frame(
+        anchor = self.client.scene.add_frame(
             f"{self.scene_prefix}/{plane_id}/gizmo_anchor",
             position=pose.position,
         )
-        gizmo = self.server.scene.add_transform_controls(
+        gizmo = self.client.scene.add_transform_controls(
             f"{self.scene_prefix}/{plane_id}/gizmo_anchor/controls",
             scale=PLANE_HALF_SIZE * GIZMO_SCALE,
             line_width=GIZMO_LINE_WIDTH,
@@ -72,7 +72,7 @@ class PlaneEditorView:
         )
 
         half = PLANE_HALF_SIZE
-        mesh = self.server.scene.add_mesh_simple(
+        mesh = self.client.scene.add_mesh_simple(
             f"{self.scene_prefix}/{plane_id}/pose/mesh",
             vertices=np.array(
                 [
@@ -87,7 +87,7 @@ class PlaneEditorView:
             opacity=0.35,
             side="double",
         )
-        normal = self.server.scene.add_arrows(
+        normal = self.client.scene.add_arrows(
             f"{self.scene_prefix}/{plane_id}/pose/normal",
             points=np.array([[[0.0, 0.0, 0.0], [0.0, 0.0, half * GIZMO_SCALE]]]),
             colors=PENTOS_BLUE,
@@ -102,18 +102,18 @@ class PlaneEditorView:
             raise RuntimeError("Set a GUI container before adding planes")
 
         with self.gui_container:
-            folder = self.server.gui.add_folder(
+            folder = self.client.gui.add_folder(
                 f"Plane {plane_id}",
                 expand_by_default=True,
             )
         with folder:
-            position = self.server.gui.add_vector3(
+            position = self.client.gui.add_vector3(
                 "Position", pose.position, step=0.001
             )
-            rotation_x = self.server.gui.add_number("Rotation X", rx, step=1.0)
-            rotation_y = self.server.gui.add_number("Rotation Y", ry, step=1.0)
-            rotation_z = self.server.gui.add_number("Rotation Z", rz, step=1.0)
-            delete_button = self.server.gui.add_button("Delete Plane")
+            rotation_x = self.client.gui.add_number("Rotation X", rx, step=1.0)
+            rotation_y = self.client.gui.add_number("Rotation Y", ry, step=1.0)
+            rotation_z = self.client.gui.add_number("Rotation Z", rz, step=1.0)
+            delete_button = self.client.gui.add_button("Delete Plane")
 
         self.planes[plane_id] = PlaneState(
             pose=pose,

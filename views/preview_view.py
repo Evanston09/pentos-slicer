@@ -15,8 +15,8 @@ SETUP_COLOR = PENTOS_ORANGE
 
 
 class PreviewView:
-    def __init__(self, server: viser.ViserServer) -> None:
-        self.server = server
+    def __init__(self, client: viser.ClientHandle) -> None:
+        self.client = client
         self.controller: PreviewController | None = None
         self.status: Any | None = None
         self.output_path: Any | None = None
@@ -33,32 +33,32 @@ class PreviewView:
         self.controller = controller
 
     def mount(self, gcode_path: Path | None) -> None:
-        self.status = self.server.gui.add_text(
+        self.status = self.client.gui.add_text(
             "Status",
             "Saved G-code",
             disabled=True,
         )
-        self.output_path = self.server.gui.add_text(
+        self.output_path = self.client.gui.add_text(
             "Output G-code",
             "" if gcode_path is None else str(gcode_path),
             disabled=True,
         )
-        self.show_travel = self.server.gui.add_checkbox("Travel", True)
-        self.line_width = self.server.gui.add_number(
+        self.show_travel = self.client.gui.add_checkbox("Travel", True)
+        self.line_width = self.client.gui.add_number(
             "Line width",
             2.0,
             min=1.0,
             max=10.0,
         )
-        self.send_handle = self.server.gui.add_button(
+        self.send_handle = self.client.gui.add_button(
             "Send to Moonraker",
             icon=viser.Icon.UPLOAD,
         )
-        self.send_print_handle = self.server.gui.add_button(
+        self.send_print_handle = self.client.gui.add_button(
             "Send and Print",
             icon=viser.Icon.PLAYER_PLAY,
         )
-        self.back_button = self.server.gui.add_button("Back to Setup")
+        self.back_button = self.client.gui.add_button("Back to Setup")
 
         @self.show_travel.on_update
         def _(_) -> None:
@@ -104,7 +104,7 @@ class PreviewView:
         )
 
         if len(preview.setup):
-            self.setup_handle = self.server.scene.add_line_segments(
+            self.setup_handle = self.client.scene.add_line_segments(
                 "/preview/setup",
                 points=preview.setup,
                 colors=SETUP_COLOR,
@@ -115,7 +115,7 @@ class PreviewView:
         for index, part in enumerate(preview.parts):
             if len(part.extrusion):
                 self.extrusion_handles.append(
-                    self.server.scene.add_line_segments(
+                    self.client.scene.add_line_segments(
                         f"/preview/part_{index}/extrusion",
                         points=part.extrusion,
                         colors=part.color,
@@ -125,7 +125,7 @@ class PreviewView:
 
             if len(part.travel):
                 self.travel_handles.append(
-                    self.server.scene.add_line_segments(
+                    self.client.scene.add_line_segments(
                         f"/preview/part_{index}/travel",
                         points=part.travel,
                         colors=part.color,

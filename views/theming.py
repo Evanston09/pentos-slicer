@@ -37,8 +37,8 @@ def titlebar_config() -> TitlebarConfig:
     )
 
 
-def configure_theme(server: viser.ViserServer) -> None:
-    server.gui.configure_theme(
+def configure_theme(client: viser.ClientHandle) -> None:
+    client.gui.configure_theme(
         titlebar_content=titlebar_config(),
         control_width="large",
         brand_color=PENTOS_BLUE,
@@ -46,8 +46,8 @@ def configure_theme(server: viser.ViserServer) -> None:
     )
 
 
-def add_build_plate_scene(server: viser.ViserServer) -> None:
-    server.scene.add_grid(
+def add_build_plate_scene(client: viser.ClientHandle) -> None:
+    client.scene.add_grid(
         "/shared/grid",
         width=BUILD_PLATE_SIZE,
         height=BUILD_PLATE_SIZE,
@@ -66,7 +66,7 @@ def add_build_plate_scene(server: viser.ViserServer) -> None:
         ],
     )
     faces = np.array([[0, 1, 2], [0, 2, 3]])
-    server.scene.add_mesh_simple(
+    client.scene.add_mesh_simple(
         "/shared/build_plate/surface",
         vertices=vertices,
         faces=faces,
@@ -75,7 +75,7 @@ def add_build_plate_scene(server: viser.ViserServer) -> None:
         side="double",
     )
 
-    server.scene.add_line_segments(
+    client.scene.add_line_segments(
         "/shared/build_plate/outline",
         points=np.array(
             [
@@ -112,7 +112,7 @@ def add_build_plate_scene(server: viser.ViserServer) -> None:
         (6, 7),
         (7, 4),
     )
-    server.scene.add_line_segments(
+    client.scene.add_line_segments(
         "/shared/build_volume/outline",
         points=np.array(
             [[corners[start], corners[end]] for start, end in edge_indices]

@@ -15,11 +15,11 @@ class SceneController(Protocol):
 
 
 class AppController:
-    def __init__(self, server: Any) -> None:
+    def __init__(self, client: Any) -> None:
         self.state = AppState(model_xy_position=BUILD_PLATE_CENTER[:2])
         self.slicer = Slicer()
-        self.setup_view = SetupView(server)
-        self.preview_view = PreviewView(server)
+        self.setup_view = SetupView(client)
+        self.preview_view = PreviewView(client)
         self.setup_controller = SetupController(
             self.state,
             self.slicer,
@@ -54,3 +54,8 @@ class AppController:
 
         self.preview_controller.mount()
         self.active_controller = self.preview_controller
+
+    def close(self) -> None:
+        if self.active_controller is not None:
+            self.active_controller.unmount()
+            self.active_controller = None
