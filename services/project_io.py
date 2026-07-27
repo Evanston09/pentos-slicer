@@ -5,6 +5,7 @@ import zipfile
 import trimesh
 
 from models import AppState, PlaneSnapshot
+from services.model_tools import source_name_from_filename, validate_mesh
 
 
 def load_scene(content: bytes) -> AppState:
@@ -13,10 +14,13 @@ def load_scene(content: bytes) -> AppState:
         model_bytes = zf.read("model.3mf")
 
     mesh = trimesh.load_mesh(io.BytesIO(model_bytes), file_type="3mf")
-    assert isinstance(mesh, trimesh.Trimesh)
+    validate_mesh(mesh)
 
     return AppState(
-        current_model=(mesh, manifest["original_model_name"]),
+        current_model=(
+            mesh,
+            source_name_from_filename(manifest["original_model_name"]),
+        ),
         model_xy_position=list(manifest["model_xy_position"]),
         model_z_degrees=manifest["model_z_degrees"],
         plane_snapshots=[

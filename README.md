@@ -52,6 +52,8 @@ http://localhost:8080
 
 At most two models are sliced concurrently by default. Set
 `MAX_CONCURRENT_SLICES` to a positive integer to change that limit.
+Uploads are limited to 50 MB by default. Set `MAX_UPLOAD_SIZE_MB` to a positive
+integer to change that limit.
 
 ## Basic Workflow
 

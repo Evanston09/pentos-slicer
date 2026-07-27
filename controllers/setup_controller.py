@@ -18,6 +18,7 @@ from services.model_tools import (
     model_within_build_volume,
     model_wxyz,
     transformed_model,
+    validate_upload,
 )
 from services.project_io import load_scene, save_scene
 from services.session_workspace import SessionWorkspace
@@ -103,15 +104,12 @@ class SetupController:
         self.view.unmount()
 
     def handle_upload(self, name: str, content: bytes) -> None:
-        if name.lower().endswith(".pentos"):
-            try:
-                self._load_scene_state(load_scene(content))
-            except Exception as exc:
-                self.view.set_status(f"Failed to load {name}: {exc}")
-                print(f"Failed to load {name}: {exc}")
-            return
-
         try:
+            _, extension = validate_upload(name, content)
+            if extension == ".pentos":
+                self._load_scene_state(load_scene(content))
+                return
+
             mesh, source_name = load_uploaded_model(name, content, self.upload_dir)
             self.state.current_model = (mesh, source_name)
             self.state.model_xy_position = BUILD_PLATE_CENTER[:2]

@@ -150,6 +150,25 @@ def test_upload_and_placement_update_state(monkeypatch, tmp_path) -> None:
     assert view.statuses[-1] == "Loaded uploaded"
 
 
+def test_upload_rejects_unsupported_file_type(tmp_path) -> None:
+    controller, view, _, _ = make_controller(workspace_path=tmp_path)
+
+    controller.handle_upload("model.exe", b"content")
+
+    assert controller.state.current_model is None
+    assert "Unsupported file type" in view.statuses[-1]
+
+
+def test_upload_rejects_oversized_file(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("MAX_UPLOAD_SIZE_MB", "1")
+    controller, view, _, _ = make_controller(workspace_path=tmp_path)
+
+    controller.handle_upload("model.stl", b"x" * (1024 * 1024 + 1))
+
+    assert controller.state.current_model is None
+    assert "exceeds the 1 MB limit" in view.statuses[-1]
+
+
 def test_model_turns_red_when_placement_leaves_build_volume() -> None:
     mesh = trimesh.creation.box(extents=[10.0, 10.0, 10.0])
     mesh.apply_translation([45.0, 45.0, 5.0])
