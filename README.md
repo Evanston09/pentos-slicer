@@ -50,6 +50,13 @@ Open the URL printed in the terminal, usually:
 http://localhost:8080
 ```
 
+Or build and run it with Docker:
+
+```bash
+docker build -t pentos-slicer .
+docker run --rm -p 8080:8080 pentos-slicer
+```
+
 At most two models are sliced concurrently by default. Set
 `MAX_CONCURRENT_SLICES` to a positive integer to change that limit.
 Uploads are limited to 50 MB by default. Set `MAX_UPLOAD_SIZE_MB` to a positive
