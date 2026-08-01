@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from controllers.preview_controller import PreviewController
 from models import AppState
 
@@ -49,44 +47,34 @@ def test_load_preview_reads_and_parses_gcode(tmp_path) -> None:
     assert view.statuses[-1].startswith("Preview: 1 parts")
 
 
-def test_send_forwards_start_print_and_reports_success(tmp_path) -> None:
+def test_download_returns_gcode_and_reports_status(tmp_path) -> None:
     path = tmp_path / "preview.gcode"
-    path.write_text("")
-    calls = []
-
-    def sender(gcode_path: Path, start_print: bool):
-        calls.append((gcode_path, start_print))
-        return {}
+    path.write_bytes(b"G90\n")
 
     view = FakePreviewView()
     controller = PreviewController(
         AppState(gcode_path=path),
         view,
         lambda: None,
-        moonraker_sender=sender,
     )
 
-    controller.send_to_moonraker(start_print=True)
+    download = controller.download_gcode()
 
-    assert calls == [(path, True)]
-    assert view.statuses[-1] == "Sent preview.gcode"
+    assert download == ("preview.gcode", b"G90\n")
+    assert view.statuses[-1] == "Downloading preview.gcode"
 
 
-def test_send_failure_reports_error(tmp_path) -> None:
+def test_download_failure_reports_error(tmp_path) -> None:
     path = tmp_path / "preview.gcode"
-    path.write_text("")
-
-    def sender(gcode_path: Path, start_print: bool):
-        raise RuntimeError("offline")
 
     view = FakePreviewView()
     controller = PreviewController(
         AppState(gcode_path=path),
         view,
         lambda: None,
-        moonraker_sender=sender,
     )
 
-    controller.send_to_moonraker(start_print=False)
+    download = controller.download_gcode()
 
-    assert view.statuses[-1] == "Moonraker upload failed: offline"
+    assert download is None
+    assert view.statuses[-1].startswith("Failed to download G-code:")

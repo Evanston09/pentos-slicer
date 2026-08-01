@@ -1,4 +1,6 @@
+from contextlib import contextmanager
 from pathlib import Path
+from threading import BoundedSemaphore
 from types import SimpleNamespace
 
 import numpy as np
@@ -19,6 +21,7 @@ class FakeSetupView:
         self.debug_mode = False
         self.mounted = False
         self.model_out_of_bounds = False
+        self.slice_enabled = []
 
     def mount(self, state: AppState) -> None:
         self.mounted = True
@@ -28,6 +31,9 @@ class FakeSetupView:
 
     def set_status(self, message: str) -> None:
         self.statuses.append(message)
+
+    def set_slice_enabled(self, enabled: bool) -> None:
+        self.slice_enabled.append(enabled)
 
     def show_mesh(self, mesh, center, position, wxyz) -> None:
         self.mesh = mesh
@@ -79,27 +85,49 @@ class FakeSlicer:
         return Path("output/model_debug.gcode")
 
 
-def make_controller(state: AppState | None = None):
+class FakeWorkspace:
+    def __init__(self, path: Path = Path(".")) -> None:
+        self.path = path
+
+    @contextmanager
+    def active_job(self):
+        yield
+
+
+def make_controller(
+    state: AppState | None = None,
+    workspace_path: Path = Path("."),
+    slicer=None,
+    slicing_slots=None,
+):
     view = FakeSetupView()
-    slicer = FakeSlicer()
+    slicer = FakeSlicer() if slicer is None else slicer
+    slicing_slots = BoundedSemaphore(2) if slicing_slots is None else slicing_slots
     navigations = []
     controller = SetupController(
         AppState() if state is None else state,
         slicer,
         view,
         lambda: navigations.append("preview"),
+        FakeWorkspace(workspace_path),
+        slicing_slots,
     )
     return controller, view, slicer, navigations
 
 
-def test_upload_and_placement_update_state(monkeypatch) -> None:
+def test_upload_and_placement_update_state(monkeypatch, tmp_path) -> None:
     mesh = trimesh.creation.box()
+
+    def load_model(name, content, upload_dir):
+        assert upload_dir == tmp_path / "uploads"
+        return mesh, "uploaded"
+
     monkeypatch.setattr(
         setup_controller_module,
         "load_uploaded_model",
-        lambda name, content: (mesh, "uploaded"),
+        load_model,
     )
-    controller, view, _, _ = make_controller()
+    controller, view, _, _ = make_controller(workspace_path=tmp_path)
 
     controller.handle_upload("uploaded.stl", b"mesh")
     controller.set_model_placement([12.0, 34.0], 45.0)
@@ -109,6 +137,25 @@ def test_upload_and_placement_update_state(monkeypatch) -> None:
     assert controller.state.model_z_degrees == 45.0
     assert view.mesh is mesh
     assert view.statuses[-1] == "Loaded uploaded"
+
+
+def test_upload_rejects_unsupported_file_type(tmp_path) -> None:
+    controller, view, _, _ = make_controller(workspace_path=tmp_path)
+
+    controller.handle_upload("model.exe", b"content")
+
+    assert controller.state.current_model is None
+    assert "Unsupported file type" in view.statuses[-1]
+
+
+def test_upload_rejects_oversized_file(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("MAX_UPLOAD_SIZE_MB", "1")
+    controller, view, _, _ = make_controller(workspace_path=tmp_path)
+
+    controller.handle_upload("model.stl", b"x" * (1024 * 1024 + 1))
+
+    assert controller.state.current_model is None
+    assert "exceeds the 1 MB limit" in view.statuses[-1]
 
 
 def test_model_turns_red_when_placement_leaves_build_volume() -> None:
@@ -197,6 +244,24 @@ def test_slice_failure_does_not_navigate() -> None:
 
     assert navigations == []
     assert view.statuses[-1] == "Failed to slice: slicer failed"
+    assert view.slice_enabled == [False, True]
+
+
+def test_slice_reports_busy_server() -> None:
+    state = AppState(current_model=(trimesh.creation.box(), "model"))
+    slicing_slots = BoundedSemaphore(1)
+    slicing_slots.acquire()
+    controller, view, slicer, navigations = make_controller(
+        state,
+        slicing_slots=slicing_slots,
+    )
+
+    controller.slice_model()
+
+    assert slicer.calls == []
+    assert navigations == []
+    assert view.statuses[-1] == "Server is busy slicing other models"
+    assert view.slice_enabled == [False, True]
 
 
 def test_export_returns_scene_filename_and_bytes() -> None:

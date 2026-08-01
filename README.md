@@ -50,6 +50,18 @@ Open the URL printed in the terminal, usually:
 http://localhost:8080
 ```
 
+Or build and run it with Docker:
+
+```bash
+docker build -t pentos-slicer .
+docker run --rm -p 8080:8080 pentos-slicer
+```
+
+At most two models are sliced concurrently by default. Set
+`MAX_CONCURRENT_SLICES` to a positive integer to change that limit.
+Uploads are limited to 50 MB by default. Set `MAX_UPLOAD_SIZE_MB` to a positive
+integer to change that limit.
+
 ## Basic Workflow
 
 1. Upload a model (`.stl`, `.3mf`, `.obj`, or `.ply`).
@@ -68,7 +80,7 @@ Sample models are available in `samples/`.
 - `controllers/` coordinates setup, preview, slicing, export, and navigation.
 - `views/` contains the Viser UI, scene rendering, plane editor, and theme.
 - `services/` contains model/project I/O, preview parsing, auto-plane selection,
-  slicing, and Moonraker integration.
+  and slicing.
 - `gcode_tools/` trims and merges generated G-code with Pentos transitions.
 - `machine.py` stores machine geometry constants.
 - `samples/` contains example models and saved Pentos scenes.

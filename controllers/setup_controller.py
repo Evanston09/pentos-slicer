@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from threading import BoundedSemaphore
 from typing import Protocol
 
 import numpy as np
@@ -18,8 +19,10 @@ from services.model_tools import (
     model_within_build_volume,
     model_wxyz,
     transformed_model,
+    validate_upload,
 )
 from services.project_io import load_scene, save_scene
+from services.session_workspace import SessionWorkspace
 from services.slicing import Slicer
 
 
@@ -29,6 +32,8 @@ class SetupViewPort(Protocol):
     def unmount(self) -> None: ...
 
     def set_status(self, message: str) -> None: ...
+
+    def set_slice_enabled(self, enabled: bool) -> None: ...
 
     def show_mesh(
         self,
@@ -74,11 +79,16 @@ class SetupController:
         slicer: Slicer,
         view: SetupViewPort,
         show_preview: Callable[[], None],
+        workspace: SessionWorkspace,
+        slicing_slots: BoundedSemaphore,
     ) -> None:
         self.state = state
         self.slicer = slicer
         self.view = view
         self.show_preview = show_preview
+        self.workspace = workspace
+        self.upload_dir = workspace.path / "uploads"
+        self.slicing_slots = slicing_slots
         self.overhang_threshold_degrees = AutoPlaneConfig().overhang_threshold_degrees
         self.next_plane_id = 0
         self._assign_missing_plane_ids()
@@ -94,16 +104,13 @@ class SetupController:
         self.view.unmount()
 
     def handle_upload(self, name: str, content: bytes) -> None:
-        if name.lower().endswith(".pentos"):
-            try:
-                self._load_scene_state(load_scene(content))
-            except Exception as exc:
-                self.view.set_status(f"Failed to load {name}: {exc}")
-                print(f"Failed to load {name}: {exc}")
-            return
-
         try:
-            mesh, source_name = load_uploaded_model(name, content)
+            _, extension = validate_upload(name, content)
+            if extension == ".pentos":
+                self._load_scene_state(load_scene(content))
+                return
+
+            mesh, source_name = load_uploaded_model(name, content, self.upload_dir)
             self.state.current_model = (mesh, source_name)
             self.state.model_xy_position = BUILD_PLATE_CENTER[:2]
             self.state.model_z_degrees = 0.0
@@ -250,28 +257,38 @@ class SetupController:
             return
 
         mesh, source_name = model
+        self.view.set_slice_enabled(False)
         try:
-            self.view.set_status(
-                "Generating debug transition check..."
-                if self.state.debug_mode
-                else "Slicing..."
-            )
-            if self.state.debug_mode:
-                output_path = self.slicer.debug_transition_check(
-                    mesh,
-                    self.state.plane_snapshots,
-                    source_name,
-                )
-            else:
-                output_path = self.slicer.slice(
-                    mesh,
-                    self.state.plane_snapshots,
-                    source_name,
-                )
+            with self.workspace.active_job():
+                if not self.slicing_slots.acquire(blocking=False):
+                    self.view.set_status("Server is busy slicing other models")
+                    return
+                try:
+                    self.view.set_status(
+                        "Generating debug transition check..."
+                        if self.state.debug_mode
+                        else "Slicing..."
+                    )
+                    if self.state.debug_mode:
+                        output_path = self.slicer.debug_transition_check(
+                            mesh,
+                            self.state.plane_snapshots,
+                            source_name,
+                        )
+                    else:
+                        output_path = self.slicer.slice(
+                            mesh,
+                            self.state.plane_snapshots,
+                            source_name,
+                        )
+                finally:
+                    self.slicing_slots.release()
         except Exception as exc:
             self.view.set_status(f"Failed to slice: {exc}")
             print(f"Failed to slice: {exc}")
             return
+        finally:
+            self.view.set_slice_enabled(True)
 
         self.state.gcode_path = output_path
         self.show_preview()

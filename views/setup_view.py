@@ -18,8 +18,8 @@ MODEL_GIZMO_SCALE = 18.0
 
 
 class SetupView:
-    def __init__(self, server: viser.ViserServer) -> None:
-        self.server = server
+    def __init__(self, client: viser.ClientHandle) -> None:
+        self.client = client
         self.controller: SetupController | None = None
         self.model_frame_handle: Any | None = None
         self.model_mesh_handle: Any | None = None
@@ -39,7 +39,7 @@ class SetupView:
         self.status: Any | None = None
         self.planes_folder: Any | None = None
         self.plane_editor = PlaneEditorView(
-            self.server,
+            self.client,
             self._handle_plane_changed,
             self._handle_plane_deleted,
             scene_prefix="/setup/planes",
@@ -55,60 +55,60 @@ class SetupView:
         self.controller = controller
 
     def mount(self, state: AppState) -> None:
-        self.upload = self.server.gui.add_upload_button(
+        self.upload = self.client.gui.add_upload_button(
             "Upload Model/Scene",
             mime_type=".stl,.3mf,.obj,.ply,.pentos",
         )
-        self.status = self.server.gui.add_text(
+        self.status = self.client.gui.add_text(
             "Status",
             "No model loaded",
             disabled=True,
         )
 
-        self.model_folder = self.server.gui.add_folder(
+        self.model_folder = self.client.gui.add_folder(
             "Model",
             expand_by_default=True,
         )
         with self.model_folder:
-            self.model_x_position = self.server.gui.add_number(
+            self.model_x_position = self.client.gui.add_number(
                 "X Position",
                 state.model_xy_position[0],
                 step=1.0,
                 disabled=state.current_model is None,
             )
-            self.model_y_position = self.server.gui.add_number(
+            self.model_y_position = self.client.gui.add_number(
                 "Y Position",
                 state.model_xy_position[1],
                 step=1.0,
                 disabled=state.current_model is None,
             )
-            self.model_z_rotation = self.server.gui.add_number(
+            self.model_z_rotation = self.client.gui.add_number(
                 "Rotation Z",
                 state.model_z_degrees,
                 step=1.0,
                 disabled=state.current_model is None,
             )
-            self.model_reset_button = self.server.gui.add_button(
+            self.model_reset_button = self.client.gui.add_button(
                 "Reset Placement",
                 disabled=state.current_model is None,
             )
-            self.show_overhangs = self.server.gui.add_checkbox(
+            self.show_overhangs = self.client.gui.add_checkbox(
                 "Show Overhangs",
                 self.show_overhangs_enabled,
                 disabled=state.current_model is None,
             )
 
-        self.planes_folder = self.server.gui.add_folder(
+        self.planes_folder = self.client.gui.add_folder(
             "Planes",
             expand_by_default=True,
         )
         self.plane_editor.gui_container = self.planes_folder
         with self.planes_folder:
-            self.add_plane_button = self.server.gui.add_button(
+            self.add_plane_button = self.client.gui.add_button(
                 "Add Plane",
                 icon=viser.Icon.SQUARES_DIAGONAL,
             )
-            self.max_auto_planes = self.server.gui.add_number(
+            self.max_auto_planes = self.client.gui.add_number(
                 "Max Auto Planes",
                 2,
                 min=0,
@@ -116,20 +116,20 @@ class SetupView:
                 step=1,
                 disabled=state.current_model is None,
             )
-            self.auto_planes_button = self.server.gui.add_button(
+            self.auto_planes_button = self.client.gui.add_button(
                 "Auto Planes",
                 disabled=state.current_model is None,
             )
-        self.debug_mode = self.server.gui.add_checkbox(
+        self.debug_mode = self.client.gui.add_checkbox(
             "Debug Mode",
             state.debug_mode,
         )
-        self.export_handle = self.server.gui.add_button(
+        self.export_handle = self.client.gui.add_button(
             "Export Scene",
             icon=viser.Icon.PACKAGE_EXPORT,
             disabled=state.current_model is None,
         )
-        self.slice_button = self.server.gui.add_button(
+        self.slice_button = self.client.gui.add_button(
             "Slice",
             icon=viser.Icon.CLOUD_COMPUTING,
         )
@@ -251,6 +251,10 @@ class SetupView:
         if self.status is not None:
             self.status.value = message
 
+    def set_slice_enabled(self, enabled: bool) -> None:
+        if self.slice_button is not None:
+            self.slice_button.disabled = not enabled
+
     def show_mesh(
         self,
         mesh: trimesh.Trimesh,
@@ -261,13 +265,13 @@ class SetupView:
         self.clear_model_scene()
         self.model_vertices = mesh.vertices - center
         self.model_faces = mesh.faces
-        self.model_frame_handle = self.server.scene.add_frame(
+        self.model_frame_handle = self.client.scene.add_frame(
             "/setup/model",
             show_axes=False,
             position=position,
             wxyz=wxyz,
         )
-        self.model_mesh_handle = self.server.scene.add_mesh_simple(
+        self.model_mesh_handle = self.client.scene.add_mesh_simple(
             "/setup/model/mesh",
             vertices=self.model_vertices,
             faces=mesh.faces,
@@ -275,7 +279,7 @@ class SetupView:
             opacity=0.45,
             side="double",
         )
-        self.model_overhang_handle = self.server.scene.add_mesh_simple(
+        self.model_overhang_handle = self.client.scene.add_mesh_simple(
             "/setup/model/overhangs",
             vertices=self.model_vertices,
             faces=np.empty((0, 3)),
@@ -283,7 +287,7 @@ class SetupView:
             opacity=0.85,
             side="double",
         )
-        self.model_gizmo_handle = self.server.scene.add_transform_controls(
+        self.model_gizmo_handle = self.client.scene.add_transform_controls(
             "/setup/model_controls",
             scale=MODEL_GIZMO_SCALE,
             line_width=MODEL_GIZMO_LINE_WIDTH,

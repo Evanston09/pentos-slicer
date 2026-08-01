@@ -78,15 +78,15 @@ def decompose_mesh(
 class Slicer:
     def __init__(
         self,
-        out_dir: Path = Path("output"),
-        temp_dir: Path = Path("temp"),
+        out_dir: Path,
+        temp_dir: Path,
         rotation_center: np.ndarray | tuple[float, float, float] = ROTATION_CENTER,
     ) -> None:
         self.out_dir = out_dir
         self.temp_dir = temp_dir
         self.rotation_center = np.array(rotation_center)
-        self.out_dir.mkdir(exist_ok=True)
-        self.temp_dir.mkdir(exist_ok=True)
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
 
     def slice(
         self,

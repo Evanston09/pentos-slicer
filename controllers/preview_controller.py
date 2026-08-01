@@ -1,10 +1,9 @@
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
 from models import AppState, GcodePreview
 from services.gcode_preview import parse_gcode_preview
-from services.moonraker import send_to_moonraker
 
 
 class PreviewViewPort(Protocol):
@@ -23,12 +22,10 @@ class PreviewController:
         state: AppState,
         view: PreviewViewPort,
         show_setup: Callable[[], None],
-        moonraker_sender: Callable[..., dict[str, Any]] = send_to_moonraker,
     ) -> None:
         self.state = state
         self.view = view
         self._show_setup = show_setup
-        self.moonraker_sender = moonraker_sender
 
     def mount(self) -> None:
         self.view.mount(self.state.gcode_path)
@@ -59,23 +56,20 @@ class PreviewController:
             f"{len(preview.setup)} setup"
         )
 
-    def send_to_moonraker(self, start_print: bool) -> None:
+    def download_gcode(self) -> tuple[str, bytes] | None:
         if self.state.gcode_path is None:
             self.view.set_status("No G-code generated")
-            return
+            return None
 
-        self.view.set_status("Sending print")
         try:
-            self.moonraker_sender(
-                self.state.gcode_path,
-                start_print=start_print,
-            )
+            content = self.state.gcode_path.read_bytes()
         except Exception as exc:
-            self.view.set_status(f"Moonraker upload failed: {exc}")
-            return
+            self.view.set_status(f"Failed to download G-code: {exc}")
+            return None
 
-        if start_print:
-            self.view.set_status(f"Sent {self.state.gcode_path.name}")
+        filename = self.state.gcode_path.name
+        self.view.set_status(f"Downloading {filename}")
+        return filename, content
 
     def show_setup(self) -> None:
         self._show_setup()
