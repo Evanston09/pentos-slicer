@@ -15,7 +15,7 @@ class SessionWorkspace:
         )
         self.path = Path(self._temporary_directory.name)
         self._lock = Lock()
-        self._active_jobs = 0
+        self._job_active = False
         self._closed = False
 
     @contextmanager
@@ -23,20 +23,22 @@ class SessionWorkspace:
         with self._lock:
             if self._closed:
                 raise RuntimeError("Session is closed")
-            self._active_jobs += 1
+            if self._job_active:
+                raise RuntimeError("A slice is already running for this session")
+            self._job_active = True
 
         try:
             yield
         finally:
             with self._lock:
-                self._active_jobs -= 1
-                cleanup = self._closed and self._active_jobs == 0
+                self._job_active = False
+                cleanup = self._closed
             if cleanup:
                 self._temporary_directory.cleanup()
 
     def close(self) -> None:
         with self._lock:
             self._closed = True
-            cleanup = self._active_jobs == 0
+            cleanup = not self._job_active
         if cleanup:
             self._temporary_directory.cleanup()

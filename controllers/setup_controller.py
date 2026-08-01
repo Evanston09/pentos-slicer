@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from threading import BoundedSemaphore
 from typing import Protocol
 
 import numpy as np
@@ -22,7 +23,6 @@ from services.model_tools import (
 )
 from services.project_io import load_scene, save_scene
 from services.session_workspace import SessionWorkspace
-from services.slice_jobs import SlicingBusyError, SlicingCoordinator
 from services.slicing import Slicer
 
 
@@ -80,7 +80,7 @@ class SetupController:
         view: SetupViewPort,
         show_preview: Callable[[], None],
         workspace: SessionWorkspace,
-        slicing_coordinator: SlicingCoordinator,
+        slicing_slots: BoundedSemaphore,
     ) -> None:
         self.state = state
         self.slicer = slicer
@@ -88,7 +88,7 @@ class SetupController:
         self.show_preview = show_preview
         self.workspace = workspace
         self.upload_dir = workspace.path / "uploads"
-        self.slicing_coordinator = slicing_coordinator
+        self.slicing_slots = slicing_slots
         self.overhang_threshold_degrees = AutoPlaneConfig().overhang_threshold_degrees
         self.next_plane_id = 0
         self._assign_missing_plane_ids()
@@ -260,7 +260,10 @@ class SetupController:
         self.view.set_slice_enabled(False)
         try:
             with self.workspace.active_job():
-                with self.slicing_coordinator.slot():
+                if not self.slicing_slots.acquire(blocking=False):
+                    self.view.set_status("Server is busy slicing other models")
+                    return
+                try:
                     self.view.set_status(
                         "Generating debug transition check..."
                         if self.state.debug_mode
@@ -278,9 +281,8 @@ class SetupController:
                             self.state.plane_snapshots,
                             source_name,
                         )
-        except SlicingBusyError as exc:
-            self.view.set_status(str(exc))
-            return
+                finally:
+                    self.slicing_slots.release()
         except Exception as exc:
             self.view.set_status(f"Failed to slice: {exc}")
             print(f"Failed to slice: {exc}")

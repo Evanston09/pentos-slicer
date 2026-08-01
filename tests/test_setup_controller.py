@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from pathlib import Path
+from threading import BoundedSemaphore
 from types import SimpleNamespace
 
 import numpy as np
@@ -9,7 +10,6 @@ import trimesh
 import controllers.setup_controller as setup_controller_module
 from controllers.setup_controller import SetupController
 from models import AppState
-from services.slice_jobs import SlicingBusyError
 
 
 class FakeSetupView:
@@ -94,26 +94,15 @@ class FakeWorkspace:
         yield
 
 
-class FakeCoordinator:
-    def __init__(self, busy: bool = False) -> None:
-        self.busy = busy
-
-    @contextmanager
-    def slot(self):
-        if self.busy:
-            raise SlicingBusyError("Server is busy slicing other models")
-        yield
-
-
 def make_controller(
     state: AppState | None = None,
     workspace_path: Path = Path("."),
     slicer=None,
-    coordinator=None,
+    slicing_slots=None,
 ):
     view = FakeSetupView()
     slicer = FakeSlicer() if slicer is None else slicer
-    coordinator = FakeCoordinator() if coordinator is None else coordinator
+    slicing_slots = BoundedSemaphore(2) if slicing_slots is None else slicing_slots
     navigations = []
     controller = SetupController(
         AppState() if state is None else state,
@@ -121,7 +110,7 @@ def make_controller(
         view,
         lambda: navigations.append("preview"),
         FakeWorkspace(workspace_path),
-        coordinator,
+        slicing_slots,
     )
     return controller, view, slicer, navigations
 
@@ -260,9 +249,11 @@ def test_slice_failure_does_not_navigate() -> None:
 
 def test_slice_reports_busy_server() -> None:
     state = AppState(current_model=(trimesh.creation.box(), "model"))
+    slicing_slots = BoundedSemaphore(1)
+    slicing_slots.acquire()
     controller, view, slicer, navigations = make_controller(
         state,
-        coordinator=FakeCoordinator(busy=True),
+        slicing_slots=slicing_slots,
     )
 
     controller.slice_model()

@@ -1,6 +1,7 @@
+from threading import BoundedSemaphore
+
 from controllers.app_controller import AppController
 from services.session_workspace import SessionWorkspace
-from services.slice_jobs import SlicingCoordinator
 
 
 class FakeController:
@@ -65,7 +66,7 @@ def test_closed_app_does_not_mount_another_screen() -> None:
 
 def test_app_uses_workspace_for_all_runtime_files() -> None:
     workspace = SessionWorkspace(1)
-    app = AppController(object(), workspace, SlicingCoordinator(2))
+    app = AppController(object(), workspace, BoundedSemaphore(2))
 
     assert app.setup_controller.upload_dir == workspace.path / "uploads"
     assert app.slicer.temp_dir == workspace.path / "temp"

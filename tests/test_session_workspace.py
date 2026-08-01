@@ -1,5 +1,7 @@
 from threading import Event, Thread
 
+import pytest
+
 from services.session_workspace import SessionWorkspace
 
 
@@ -17,6 +19,10 @@ def test_close_waits_for_active_job_before_removing_workspace() -> None:
     thread = Thread(target=run_job)
     thread.start()
     assert started.wait(timeout=2.0)
+
+    with pytest.raises(RuntimeError, match="already running"):
+        with workspace.active_job():
+            pass
 
     workspace.close()
     assert path.exists()

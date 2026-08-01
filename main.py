@@ -1,11 +1,11 @@
 from dataclasses import dataclass
 import os
+from threading import BoundedSemaphore
 
 import viser
 
 from controllers.app_controller import AppController
 from services.session_workspace import SessionWorkspace
-from services.slice_jobs import SlicingCoordinator
 from views.theming import add_build_plate_scene, configure_theme
 
 
@@ -22,10 +22,7 @@ class ClientSession:
 
 
 def max_concurrent_slices() -> int:
-    try:
-        value = int(os.getenv("MAX_CONCURRENT_SLICES", "2"))
-    except ValueError as exc:
-        raise ValueError("MAX_CONCURRENT_SLICES must be an integer") from exc
+    value = int(os.getenv("MAX_CONCURRENT_SLICES", "2"))
     if value < 1:
         raise ValueError("MAX_CONCURRENT_SLICES must be at least 1")
     return value
@@ -34,7 +31,7 @@ def max_concurrent_slices() -> int:
 def register_client_sessions(
     server: viser.ViserServer,
 ) -> dict[int, ClientSession]:
-    slicing_coordinator = SlicingCoordinator(max_concurrent_slices())
+    slicing_slots = BoundedSemaphore(max_concurrent_slices())
     sessions: dict[int, ClientSession] = {}
 
     @server.on_client_connect
@@ -43,7 +40,7 @@ def register_client_sessions(
         add_build_plate_scene(client)
         workspace = SessionWorkspace(client.client_id)
         try:
-            app = AppController(client, workspace, slicing_coordinator)
+            app = AppController(client, workspace, slicing_slots)
         except Exception:
             workspace.close()
             raise
