@@ -18,6 +18,7 @@ class FakeSetupView:
         self.planes = []
         self.mesh = None
         self.removed_plane_ids: list[int] = []
+        self.plane_poses = {}
         self.debug_mode = False
         self.mounted = False
         self.model_out_of_bounds = False
@@ -62,6 +63,9 @@ class FakeSetupView:
     def remove_plane(self, plane_id: int) -> None:
         self.removed_plane_ids.append(plane_id)
         self.planes = [plane for plane in self.planes if plane.plane_id != plane_id]
+
+    def set_plane_pose(self, plane_id, position, wxyz) -> None:
+        self.plane_poses[plane_id] = (position, wxyz)
 
     def set_debug_mode_value(self, enabled: bool) -> None:
         self.debug_mode = enabled
@@ -192,6 +196,26 @@ def test_plane_changes_update_canonical_state_immediately() -> None:
     controller.remove_plane(0)
     assert controller.state.plane_snapshots == []
     assert view.removed_plane_ids == [0]
+
+
+def test_plane_snaps_to_clicked_model_face() -> None:
+    mesh = trimesh.creation.box(extents=[10.0, 10.0, 10.0])
+    mesh.apply_translation([45.0, 45.0, 5.0])
+    controller, view, _, _ = make_controller(AppState(current_model=(mesh, "box")))
+    controller.add_plane()
+
+    snapped = controller.snap_plane_to_face(
+        0,
+        np.array([60.0, 45.0, 5.0]),
+        np.array([-1.0, 0.0, 0.0]),
+    )
+
+    assert snapped
+    plane = controller.state.plane_snapshots[0]
+    assert_allclose(plane.position, [50.0, 45.0, 5.0])
+    rotation = trimesh.transformations.quaternion_matrix(plane.wxyz)[:3, :3]
+    assert_allclose(rotation @ [0.0, 0.0, 1.0], [1.0, 0.0, 0.0])
+    assert 0 in view.plane_poses
 
 
 def test_auto_planes_replace_existing_planes(monkeypatch) -> None:

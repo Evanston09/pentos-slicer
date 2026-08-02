@@ -39,12 +39,14 @@ class PlaneEditorView:
         client: ClientHandle,
         on_plane_changed: Callable[[int, np.ndarray, np.ndarray], None],
         on_plane_deleted: Callable[[int], None],
+        on_plane_snap_requested: Callable[[int], None],
         gui_container: Any | None = None,
         scene_prefix: str = "/planes",
     ):
         self.client = client
         self.on_plane_changed = on_plane_changed
         self.on_plane_deleted = on_plane_deleted
+        self.on_plane_snap_requested = on_plane_snap_requested
         self.gui_container = gui_container
         self.scene_prefix = scene_prefix
         self.planes: dict[int, PlaneState] = {}
@@ -113,6 +115,7 @@ class PlaneEditorView:
             rotation_x = self.client.gui.add_number("Rotation X", rx, step=1.0)
             rotation_y = self.client.gui.add_number("Rotation Y", ry, step=1.0)
             rotation_z = self.client.gui.add_number("Rotation Z", rz, step=1.0)
+            snap_button = self.client.gui.add_button("Snap to Face")
             delete_button = self.client.gui.add_button("Delete Plane")
 
         self.planes[plane_id] = PlaneState(
@@ -127,6 +130,7 @@ class PlaneEditorView:
                 "rotation_x": rotation_x,
                 "rotation_y": rotation_y,
                 "rotation_z": rotation_z,
+                "snap_button": snap_button,
                 "delete_button": delete_button,
             },
         )
@@ -170,6 +174,10 @@ class PlaneEditorView:
         def _(_):
             update_rotation()
 
+        @snap_button.on_click
+        def _(_):
+            self.on_plane_snap_requested(plane_id)
+
         @delete_button.on_click
         def _(_):
             self.on_plane_deleted(plane_id)
@@ -182,6 +190,17 @@ class PlaneEditorView:
         self.clear()
         for plane in planes:
             self.add_plane(plane)
+
+    def set_plane_pose(
+        self,
+        plane_id: int,
+        position: np.ndarray,
+        wxyz: np.ndarray,
+    ) -> None:
+        if plane_id not in self.planes:
+            return
+        self._set_plane_pose(plane_id, position, wxyz)
+        self._sync_gui_from_pose(plane_id)
 
     def remove_plane(self, plane_id: int) -> None:
         del_state = self.planes.pop(plane_id, None)

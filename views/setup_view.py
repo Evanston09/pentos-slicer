@@ -42,8 +42,10 @@ class SetupView:
             self.client,
             self._handle_plane_changed,
             self._handle_plane_deleted,
+            self._arm_plane_snap,
             scene_prefix="/setup/planes",
         )
+        self.armed_snap_plane_id: int | None = None
         self.add_plane_button: Any | None = None
         self.max_auto_planes: Any | None = None
         self.auto_planes_button: Any | None = None
@@ -404,7 +406,18 @@ class SetupView:
         self.plane_editor.add_plane(plane)
 
     def remove_plane(self, plane_id: int) -> None:
+        if self.armed_snap_plane_id == plane_id:
+            self.armed_snap_plane_id = None
+            self.client.scene.remove_click_callback(self._handle_scene_click)
         self.plane_editor.remove_plane(plane_id)
+
+    def set_plane_pose(
+        self,
+        plane_id: int,
+        position: np.ndarray,
+        wxyz: np.ndarray,
+    ) -> None:
+        self.plane_editor.set_plane_pose(plane_id, position, wxyz)
 
     def set_debug_mode_value(self, enabled: bool) -> None:
         if self.debug_mode is not None:
@@ -460,3 +473,24 @@ class SetupView:
     def _handle_plane_deleted(self, plane_id: int) -> None:
         if self.controller is not None:
             self.controller.remove_plane(plane_id)
+
+    def _arm_plane_snap(self, plane_id: int) -> None:
+        self.client.scene.remove_click_callback(self._handle_scene_click)
+        self.client.scene.on_click()(self._handle_scene_click)
+        self.armed_snap_plane_id = plane_id
+        self.set_status(f"Plane {plane_id}: click a model face to snap")
+
+    def _handle_scene_click(self, event) -> None:
+        plane_id = self.armed_snap_plane_id
+        if plane_id is None or self.controller is None:
+            return
+        snapped = self.controller.snap_plane_to_face(
+            plane_id,
+            np.array(event.ray_origin),
+            np.array(event.ray_direction),
+        )
+        if not snapped:
+            return
+        self.armed_snap_plane_id = None
+        self.client.scene.remove_click_callback(self._handle_scene_click)
+        self.set_status(f"Plane {plane_id} snapped to model face")

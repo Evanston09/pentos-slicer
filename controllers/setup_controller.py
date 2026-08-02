@@ -11,6 +11,7 @@ from services.auto_planes import (
     AutoPlaneConfig,
     AutoPlaneSelector,
     overhang_preview_mesh,
+    quaternion_from_z_to,
 )
 from services.model_tools import (
     load_uploaded_model,
@@ -68,6 +69,13 @@ class SetupViewPort(Protocol):
     def add_plane(self, plane: PlaneSnapshot) -> None: ...
 
     def remove_plane(self, plane_id: int) -> None: ...
+
+    def set_plane_pose(
+        self,
+        plane_id: int,
+        position: np.ndarray,
+        wxyz: np.ndarray,
+    ) -> None: ...
 
     def set_debug_mode_value(self, enabled: bool) -> None: ...
 
@@ -184,6 +192,31 @@ class SetupController:
         ]
         self.view.remove_plane(plane_id)
         self.refresh_overhang_preview()
+
+    def snap_plane_to_face(
+        self,
+        plane_id: int,
+        ray_origin: np.ndarray,
+        ray_direction: np.ndarray,
+    ) -> bool:
+        model = transformed_model(self.state)
+        plane = self._find_plane(plane_id)
+        if model is None or plane is None:
+            return False
+
+        mesh, _ = model
+        locations, _, face_indices = mesh.ray.intersects_location(
+            [ray_origin], [ray_direction]
+        )
+        if len(locations) == 0:
+            return False
+
+        hit_index = int(np.linalg.norm(locations - ray_origin, axis=1).argmin())
+        plane.position = locations[hit_index]
+        plane.wxyz = quaternion_from_z_to(mesh.face_normals[face_indices[hit_index]])
+        self.view.set_plane_pose(plane_id, plane.position, plane.wxyz)
+        self.refresh_overhang_preview()
+        return True
 
     def set_debug_mode(self, enabled: bool) -> None:
         self.state.debug_mode = enabled
