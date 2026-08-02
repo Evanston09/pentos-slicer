@@ -70,7 +70,7 @@ class AutoPlaneCandidate:
     @property
     def wxyz(self) -> np.ndarray:
         """Return the quaternion that rotates print-up to the plane normal."""
-        return _quaternion_from_z_to(self.normal)
+        return quaternion_from_z_to(self.normal)
 
     def offset(self) -> float:
         """Return the plane's signed offset from the origin."""
@@ -340,7 +340,7 @@ def _normalize(vector: np.ndarray) -> np.ndarray:
     return vector / norm
 
 
-def _quaternion_from_z_to(normal: np.ndarray) -> np.ndarray:
+def quaternion_from_z_to(normal: np.ndarray) -> np.ndarray:
     """Create a quaternion rotating the positive Z axis onto a normal."""
     normal = _normalize(normal)
     source = DEFAULT_PRINT_DIRECTION
