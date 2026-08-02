@@ -6,7 +6,8 @@ import numpy as np
 import trimesh
 import viser
 
-from models import AppState, PlaneSnapshot
+from models import AppState, GuideSurfaceSnapshot, PlaneSnapshot
+from views.guide_surface_editor_view import GuideSurfaceEditorView
 from views.plane_editor_view import PlaneEditorView
 from views.theming import OVERHANG_RED, PENTOS_BLUE
 
@@ -46,12 +47,19 @@ class SetupView:
             self._arm_plane_snap,
             scene_prefix="/setup/planes",
         )
-        self.armed_snap_plane_id: int | None = None
+        self.guide_surface_editor = GuideSurfaceEditorView(
+            self.client,
+            self._handle_guide_surface_changed,
+            self._handle_guide_surface_deleted,
+            self._arm_guide_surface_snap,
+            scene_prefix="/setup/guides",
+        )
+        self.armed_snap_target: tuple[str, int] | None = None
         self.add_plane_button: Any | None = None
         self.max_auto_planes: Any | None = None
         self.auto_planes_button: Any | None = None
         self.nonplanar_folder: Any | None = None
-        self.nonplanar_message: Any | None = None
+        self.add_guide_surface_button: Any | None = None
         self.debug_mode: Any | None = None
         self.export_handle: Any | None = None
         self.slice_button: Any | None = None
@@ -60,6 +68,8 @@ class SetupView:
         self.controller = controller
 
     def mount(self, state: AppState) -> None:
+        self.plane_editor.set_visible(True)
+        self.guide_surface_editor.set_visible(False)
         self.upload = self.client.gui.add_upload_button(
             "Upload Model/Scene",
             mime_type=".stl,.3mf,.obj,.ply,.pentos",
@@ -112,7 +122,7 @@ class SetupView:
             "Multiplanar",
             expand_by_default=True,
         )
-        self.plane_editor.gui_container = self.planes_folder
+        self.plane_editor.pose_editor.gui_container = self.planes_folder
         with self.planes_folder:
             self.add_plane_button = self.client.gui.add_button(
                 "Add Plane",
@@ -135,9 +145,11 @@ class SetupView:
             expand_by_default=True,
             visible=False,
         )
+        self.guide_surface_editor.pose_editor.gui_container = self.nonplanar_folder
         with self.nonplanar_folder:
-            self.nonplanar_message = self.client.gui.add_markdown(
-                "Guide-surface editing will be added here."
+            self.add_guide_surface_button = self.client.gui.add_button(
+                "Add Guide Surface",
+                icon=viser.Icon.SQUARES_DIAGONAL,
             )
         self.debug_mode = self.client.gui.add_checkbox(
             "Debug Mode",
@@ -201,6 +213,11 @@ class SetupView:
                     int(round(self.max_auto_planes.value))
                 )
 
+        @self.add_guide_surface_button.on_click
+        def _(_) -> None:
+            if self.controller is not None:
+                self.controller.nonplanar.add_guide()
+
         @self.debug_mode.on_update
         def _(_) -> None:
             if self.controller is not None:
@@ -230,15 +247,19 @@ class SetupView:
         if self.upload is None:
             return
 
+        self.client.scene.remove_click_callback(self._handle_scene_click)
+        self.armed_snap_target = None
         self.plane_editor.clear()
-        self.plane_editor.gui_container = None
+        self.plane_editor.pose_editor.gui_container = None
+        self.guide_surface_editor.clear()
+        self.guide_surface_editor.pose_editor.gui_container = None
         self.clear_model_scene()
 
         for handle in (
             self.slice_button,
             self.export_handle,
             self.debug_mode,
-            self.nonplanar_message,
+            self.add_guide_surface_button,
             self.nonplanar_folder,
             self.auto_planes_button,
             self.max_auto_planes,
@@ -271,7 +292,7 @@ class SetupView:
         self.max_auto_planes = None
         self.auto_planes_button = None
         self.nonplanar_folder = None
-        self.nonplanar_message = None
+        self.add_guide_surface_button = None
         self.debug_mode = None
         self.export_handle = None
         self.slice_button = None
@@ -295,6 +316,7 @@ class SetupView:
         if self.nonplanar_folder is not None:
             self.nonplanar_folder.visible = not multiplanar
         self.plane_editor.set_visible(multiplanar)
+        self.guide_surface_editor.set_visible(not multiplanar)
 
     def show_mesh(
         self,
@@ -445,9 +467,7 @@ class SetupView:
         self.plane_editor.add_plane(plane)
 
     def remove_plane(self, plane_id: int) -> None:
-        if self.armed_snap_plane_id == plane_id:
-            self.armed_snap_plane_id = None
-            self.client.scene.remove_click_callback(self._handle_scene_click)
+        self._disarm_snap(("plane", plane_id))
         self.plane_editor.remove_plane(plane_id)
 
     def set_plane_pose(
@@ -461,6 +481,35 @@ class SetupView:
     def set_debug_mode_value(self, enabled: bool) -> None:
         if self.debug_mode is not None:
             self.debug_mode.value = enabled
+
+    def replace_guide_surfaces(
+        self,
+        guides: list[GuideSurfaceSnapshot],
+    ) -> None:
+        self.guide_surface_editor.replace_guides(guides)
+
+    def add_guide_surface(self, guide: GuideSurfaceSnapshot) -> None:
+        self.guide_surface_editor.add_guide(guide)
+
+    def remove_guide_surface(self, guide_id: int) -> None:
+        self._disarm_snap(("guide", guide_id))
+        self.guide_surface_editor.remove_guide(guide_id)
+
+    def set_guide_surface_pose(
+        self,
+        guide_id: int,
+        position: np.ndarray,
+        wxyz: np.ndarray,
+    ) -> None:
+        self.guide_surface_editor.set_guide_pose(guide_id, position, wxyz)
+
+    def set_guide_surface_mesh(
+        self,
+        guide_id: int,
+        vertices: np.ndarray,
+        faces: np.ndarray,
+    ) -> None:
+        self.guide_surface_editor.set_guide_mesh(guide_id, vertices, faces)
 
     def _sync_model_controls(
         self,
@@ -513,23 +562,59 @@ class SetupView:
         if self.controller is not None:
             self.controller.remove_plane(plane_id)
 
+    def _handle_guide_surface_changed(
+        self,
+        guide_id: int,
+        position: np.ndarray,
+        wxyz: np.ndarray,
+        bend_x: float,
+        bend_y: float,
+    ) -> None:
+        if self.controller is not None:
+            self.controller.nonplanar.update_guide(
+                guide_id, position, wxyz, bend_x, bend_y
+            )
+
+    def _handle_guide_surface_deleted(self, guide_id: int) -> None:
+        if self.controller is not None:
+            self.controller.nonplanar.remove_guide(guide_id)
+
     def _arm_plane_snap(self, plane_id: int) -> None:
+        self._arm_snap("plane", plane_id)
+
+    def _arm_guide_surface_snap(self, guide_id: int) -> None:
+        self._arm_snap("guide", guide_id)
+
+    def _arm_snap(self, kind: str, item_id: int) -> None:
         self.client.scene.remove_click_callback(self._handle_scene_click)
         self.client.scene.on_click()(self._handle_scene_click)
-        self.armed_snap_plane_id = plane_id
-        self.set_status(f"Plane {plane_id}: click a model face to snap")
+        self.armed_snap_target = (kind, item_id)
+        self.set_status(f"{kind.title()} {item_id}: click a model face to snap")
+
+    def _disarm_snap(self, target: tuple[str, int]) -> None:
+        if self.armed_snap_target == target:
+            self.armed_snap_target = None
+            self.client.scene.remove_click_callback(self._handle_scene_click)
 
     def _handle_scene_click(self, event) -> None:
-        plane_id = self.armed_snap_plane_id
-        if plane_id is None or self.controller is None:
+        target = self.armed_snap_target
+        if target is None or self.controller is None:
             return
-        snapped = self.controller.snap_plane_to_face(
-            plane_id,
-            np.array(event.ray_origin),
-            np.array(event.ray_direction),
-        )
+        kind, item_id = target
+        ray_origin = np.array(event.ray_origin)
+        ray_direction = np.array(event.ray_direction)
+        if kind == "plane":
+            snapped = self.controller.snap_plane_to_face(
+                item_id,
+                ray_origin,
+                ray_direction,
+            )
+        else:
+            snapped = self.controller.nonplanar.snap_guide_to_face(
+                item_id, ray_origin, ray_direction
+            )
         if not snapped:
             return
-        self.armed_snap_plane_id = None
+        self.armed_snap_target = None
         self.client.scene.remove_click_callback(self._handle_scene_click)
-        self.set_status(f"Plane {plane_id} snapped to model face")
+        self.set_status(f"{kind.title()} {item_id} snapped to model face")

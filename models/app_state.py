@@ -3,6 +3,7 @@ from pathlib import Path
 
 import trimesh
 
+from .guide_surface import GuideSurfaceSnapshot
 from .plane import PlaneSnapshot
 
 
@@ -14,5 +15,6 @@ class AppState:
     )
     model_z_degrees: float = 0.0
     plane_snapshots: list[PlaneSnapshot] = field(default_factory=list)
+    guide_surfaces: list[GuideSurfaceSnapshot] = field(default_factory=list)
     gcode_path: Path | None = None
     debug_mode: bool = False

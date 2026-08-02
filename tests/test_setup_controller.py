@@ -23,6 +23,7 @@ class FakeSetupView:
         self.mounted = False
         self.model_out_of_bounds = False
         self.slice_enabled = []
+        self.guides = []
 
     def mount(self, state: AppState) -> None:
         self.mounted = True
@@ -69,6 +70,21 @@ class FakeSetupView:
 
     def set_debug_mode_value(self, enabled: bool) -> None:
         self.debug_mode = enabled
+
+    def replace_guide_surfaces(self, guides) -> None:
+        self.guides = list(guides)
+
+    def add_guide_surface(self, guide) -> None:
+        self.guides.append(guide)
+
+    def remove_guide_surface(self, guide_id: int) -> None:
+        self.guides = [guide for guide in self.guides if guide.guide_id != guide_id]
+
+    def set_guide_surface_pose(self, guide_id, position, wxyz) -> None:
+        pass
+
+    def set_guide_surface_mesh(self, guide_id, vertices, faces) -> None:
+        pass
 
 
 class FakeSlicer:

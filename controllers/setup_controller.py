@@ -5,6 +5,7 @@ from typing import Protocol
 import numpy as np
 import trimesh
 
+from controllers.nonplanar_controller import NonplanarController, NonplanarViewPort
 from machine import BUILD_PLATE_CENTER
 from models import AppState, PlaneSnapshot
 from services.auto_planes import (
@@ -27,7 +28,7 @@ from services.session_workspace import SessionWorkspace
 from services.slicing import Slicer
 
 
-class SetupViewPort(Protocol):
+class SetupViewPort(NonplanarViewPort, Protocol):
     def mount(self, state: AppState) -> None: ...
 
     def unmount(self) -> None: ...
@@ -100,10 +101,12 @@ class SetupController:
         self.overhang_threshold_degrees = AutoPlaneConfig().overhang_threshold_degrees
         self.next_plane_id = 0
         self._assign_missing_plane_ids()
+        self.nonplanar: NonplanarController = NonplanarController(state, view)
 
     def mount(self) -> None:
         self.view.mount(self.state)
         self.view.replace_planes(self.state.plane_snapshots)
+        self.nonplanar.mount()
         if self.state.current_model is not None:
             self._show_current_model()
             self.view.set_status(f"Loaded {self.state.current_model[1]}")
