@@ -186,6 +186,11 @@ class PlaneEditorView:
         for plane_id in list(self.planes):
             self.remove_plane(plane_id)
 
+    def set_visible(self, visible: bool) -> None:
+        for state in self.planes.values():
+            state.pose.visible = visible
+            state.anchor.visible = visible
+
     def replace_planes(self, planes: list[PlaneSnapshot]) -> None:
         self.clear()
         for plane in planes:

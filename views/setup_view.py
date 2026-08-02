@@ -37,6 +37,7 @@ class SetupView:
         self.show_overhangs_enabled = True
         self.upload: Any | None = None
         self.status: Any | None = None
+        self.slicing_mode_control: Any | None = None
         self.planes_folder: Any | None = None
         self.plane_editor = PlaneEditorView(
             self.client,
@@ -49,6 +50,8 @@ class SetupView:
         self.add_plane_button: Any | None = None
         self.max_auto_planes: Any | None = None
         self.auto_planes_button: Any | None = None
+        self.nonplanar_folder: Any | None = None
+        self.nonplanar_message: Any | None = None
         self.debug_mode: Any | None = None
         self.export_handle: Any | None = None
         self.slice_button: Any | None = None
@@ -100,8 +103,13 @@ class SetupView:
                 disabled=state.current_model is None,
             )
 
+        self.slicing_mode_control = self.client.gui.add_button_group(
+            "Slicing Mode",
+            ("Multiplanar", "Nonplanar"),
+        )
+
         self.planes_folder = self.client.gui.add_folder(
-            "Planes",
+            "Multiplanar",
             expand_by_default=True,
         )
         self.plane_editor.gui_container = self.planes_folder
@@ -121,6 +129,15 @@ class SetupView:
             self.auto_planes_button = self.client.gui.add_button(
                 "Auto Planes",
                 disabled=state.current_model is None,
+            )
+        self.nonplanar_folder = self.client.gui.add_folder(
+            "Nonplanar",
+            expand_by_default=True,
+            visible=False,
+        )
+        with self.nonplanar_folder:
+            self.nonplanar_message = self.client.gui.add_markdown(
+                "Guide-surface editing will be added here."
             )
         self.debug_mode = self.client.gui.add_checkbox(
             "Debug Mode",
@@ -167,6 +184,10 @@ class SetupView:
                 self.controller.refresh_overhang_preview()
             else:
                 self.show_full_model()
+
+        @self.slicing_mode_control.on_click
+        def _(_) -> None:
+            self.set_slicing_mode(self.slicing_mode_control.value.lower())
 
         @self.add_plane_button.on_click
         def _(_) -> None:
@@ -217,6 +238,8 @@ class SetupView:
             self.slice_button,
             self.export_handle,
             self.debug_mode,
+            self.nonplanar_message,
+            self.nonplanar_folder,
             self.auto_planes_button,
             self.max_auto_planes,
             self.add_plane_button,
@@ -227,6 +250,7 @@ class SetupView:
             self.model_y_position,
             self.model_x_position,
             self.model_folder,
+            self.slicing_mode_control,
             self.status,
             self.upload,
         ):
@@ -235,6 +259,7 @@ class SetupView:
 
         self.upload = None
         self.status = None
+        self.slicing_mode_control = None
         self.planes_folder = None
         self.model_folder = None
         self.show_overhangs = None
@@ -245,6 +270,8 @@ class SetupView:
         self.add_plane_button = None
         self.max_auto_planes = None
         self.auto_planes_button = None
+        self.nonplanar_folder = None
+        self.nonplanar_message = None
         self.debug_mode = None
         self.export_handle = None
         self.slice_button = None
@@ -256,6 +283,18 @@ class SetupView:
     def set_slice_enabled(self, enabled: bool) -> None:
         if self.slice_button is not None:
             self.slice_button.disabled = not enabled
+
+    def set_slicing_mode(self, mode: str) -> None:
+        multiplanar = mode == "multiplanar"
+        if self.planes_folder is not None:
+            self.planes_folder.visible = multiplanar
+        if self.debug_mode is not None:
+            self.debug_mode.visible = multiplanar
+        if self.slice_button is not None:
+            self.slice_button.visible = multiplanar
+        if self.nonplanar_folder is not None:
+            self.nonplanar_folder.visible = not multiplanar
+        self.plane_editor.set_visible(multiplanar)
 
     def show_mesh(
         self,
