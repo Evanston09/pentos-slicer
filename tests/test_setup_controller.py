@@ -9,7 +9,7 @@ import trimesh
 
 import controllers.setup_controller as setup_controller_module
 from controllers.setup_controller import SetupController
-from models import AppState
+from models import AppState, GuideSurfaceSnapshot
 
 
 class FakeSetupView:
@@ -24,6 +24,7 @@ class FakeSetupView:
         self.model_out_of_bounds = False
         self.slice_enabled = []
         self.guides = []
+        self.tweens = []
 
     def mount(self, state: AppState) -> None:
         self.mounted = True
@@ -85,6 +86,9 @@ class FakeSetupView:
 
     def set_guide_surface_mesh(self, guide_id, vertices, faces) -> None:
         pass
+
+    def replace_tween_surfaces(self, meshes) -> None:
+        self.tweens = meshes
 
 
 class FakeSlicer:
@@ -260,6 +264,28 @@ def test_auto_planes_replace_existing_planes(monkeypatch) -> None:
     assert len(controller.state.plane_snapshots) == 1
     assert view.planes == controller.state.plane_snapshots
     assert view.statuses[-1] == "Auto Planes: selected 1 plane(s)"
+
+
+def test_tween_surface_count_updates_preview() -> None:
+    state = AppState(
+        guide_surfaces=[
+            GuideSurfaceSnapshot(
+                np.array([0.0, 0.0, 0.0]),
+                np.array([1.0, 0.0, 0.0, 0.0]),
+                guide_id=0,
+            ),
+            GuideSurfaceSnapshot(
+                np.array([0.0, 0.0, 10.0]),
+                np.array([1.0, 0.0, 0.0, 0.0]),
+                guide_id=1,
+            ),
+        ]
+    )
+    controller, view, _, _ = make_controller(state)
+
+    controller.nonplanar.set_tween_surface_count(7)
+
+    assert len(view.tweens) == 7
 
 
 def test_slice_dispatches_normal_and_debug_modes() -> None:

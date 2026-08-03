@@ -6,7 +6,12 @@ import numpy as np
 import trimesh
 import viser
 
-from models import AppState, GuideSurfaceSnapshot, PlaneSnapshot
+from models import (
+    AppState,
+    GuideSurfaceSnapshot,
+    PlaneSnapshot,
+    DEFAULT_TWEEN_SURFACES_PER_PAIR,
+)
 from views.guide_surface_editor_view import GuideSurfaceEditorView
 from views.plane_editor_view import PlaneEditorView
 from views.theming import OVERHANG_RED, PENTOS_BLUE
@@ -60,6 +65,8 @@ class SetupView:
         self.auto_planes_button: Any | None = None
         self.nonplanar_folder: Any | None = None
         self.add_guide_surface_button: Any | None = None
+        self.show_tweens: Any | None = None
+        self.tween_surface_count: Any | None = None
         self.debug_mode: Any | None = None
         self.export_handle: Any | None = None
         self.slice_button: Any | None = None
@@ -151,6 +158,20 @@ class SetupView:
                 "Add Guide Surface",
                 icon=viser.Icon.SQUARES_DIAGONAL,
             )
+            self.show_tweens = self.client.gui.add_checkbox(
+                "Show Tweens", self.guide_surface_editor.tweens_visible
+            )
+            self.tween_surface_count = self.client.gui.add_number(
+                "Tween Surfaces",
+                (
+                    self.controller.nonplanar.tween_surface_count
+                    if self.controller is not None
+                    else DEFAULT_TWEEN_SURFACES_PER_PAIR
+                ),
+                min=1,
+                max=50,
+                step=1,
+            )
         self.debug_mode = self.client.gui.add_checkbox(
             "Debug Mode",
             state.debug_mode,
@@ -218,6 +239,17 @@ class SetupView:
             if self.controller is not None:
                 self.controller.nonplanar.add_guide()
 
+        @self.show_tweens.on_update
+        def _(_) -> None:
+            self.guide_surface_editor.set_tweens_visible(self.show_tweens.value)
+
+        @self.tween_surface_count.on_update
+        def _(_) -> None:
+            if self.controller is not None:
+                self.controller.nonplanar.set_tween_surface_count(
+                    int(round(self.tween_surface_count.value))
+                )
+
         @self.debug_mode.on_update
         def _(_) -> None:
             if self.controller is not None:
@@ -259,6 +291,8 @@ class SetupView:
             self.slice_button,
             self.export_handle,
             self.debug_mode,
+            self.tween_surface_count,
+            self.show_tweens,
             self.add_guide_surface_button,
             self.nonplanar_folder,
             self.auto_planes_button,
@@ -293,6 +327,8 @@ class SetupView:
         self.auto_planes_button = None
         self.nonplanar_folder = None
         self.add_guide_surface_button = None
+        self.show_tweens = None
+        self.tween_surface_count = None
         self.debug_mode = None
         self.export_handle = None
         self.slice_button = None
@@ -510,6 +546,12 @@ class SetupView:
         faces: np.ndarray,
     ) -> None:
         self.guide_surface_editor.set_guide_mesh(guide_id, vertices, faces)
+
+    def replace_tween_surfaces(
+        self,
+        meshes: list[tuple[np.ndarray, np.ndarray]],
+    ) -> None:
+        self.guide_surface_editor.replace_tweens(meshes)
 
     def _sync_model_controls(
         self,

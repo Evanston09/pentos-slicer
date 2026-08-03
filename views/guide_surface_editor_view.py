@@ -39,6 +39,8 @@ class GuideSurfaceEditorView:
         )
         self.pose_editor.visible = False
         self.guides: dict[int, GuideSurfaceState] = {}
+        self.tween_meshes: list[Any] = []
+        self.tweens_visible = True
 
     def add_guide(self, guide: GuideSurfaceSnapshot) -> None:
         if guide.guide_id is None:
@@ -93,6 +95,7 @@ class GuideSurfaceEditorView:
             update_bend()
 
     def clear(self) -> None:
+        self.replace_tweens([])
         for guide_id in list(self.guides):
             self.remove_guide(guide_id)
 
@@ -110,6 +113,32 @@ class GuideSurfaceEditorView:
 
     def set_visible(self, visible: bool) -> None:
         self.pose_editor.set_visible(visible)
+        for mesh in self.tween_meshes:
+            mesh.visible = visible and self.tweens_visible
+
+    def set_tweens_visible(self, visible: bool) -> None:
+        self.tweens_visible = visible
+        for mesh in self.tween_meshes:
+            mesh.visible = visible and self.pose_editor.visible
+
+    def replace_tweens(
+        self,
+        meshes: list[tuple[np.ndarray, np.ndarray]],
+    ) -> None:
+        for mesh in self.tween_meshes:
+            mesh.remove()
+        self.tween_meshes = [
+            self.client.scene.add_mesh_simple(
+                f"{self.scene_prefix}/tweens/{index}",
+                vertices=vertices,
+                faces=faces,
+                color=PENTOS_ORANGE,
+                opacity=0.12,
+                side="double",
+                visible=self.pose_editor.visible and self.tweens_visible,
+            )
+            for index, (vertices, faces) in enumerate(meshes)
+        ]
 
     def set_guide_pose(
         self,
