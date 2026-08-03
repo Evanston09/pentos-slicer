@@ -119,3 +119,7 @@ uv run python -m compileall .
 
 For visible UI changes, run the app, load a sample model, add a plane, and
 exercise the setup-to-preview flow.
+
+## License
+
+Pentos is licensed under the [GNU General Public License v3.0](LICENSE).
