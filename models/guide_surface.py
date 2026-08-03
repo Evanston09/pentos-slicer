@@ -12,9 +12,9 @@ DEFAULT_TWEEN_SURFACES_PER_PAIR = 4
 class GuideSurfaceSnapshot:
     position: np.ndarray
     wxyz: np.ndarray
+    guide_id: int
     bend_x: float = 0.0
     bend_y: float = 0.0
-    guide_id: int | None = None
 
 
 def guide_surface_mesh(
@@ -50,10 +50,7 @@ def tween_surface_meshes(
     count: int = DEFAULT_TWEEN_SURFACES_PER_PAIR,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
     """Tween adjacent guides by ID using their shortest whole-grid alignment."""
-    ordered = sorted(
-        (guide for guide in guides if guide.guide_id is not None),
-        key=lambda guide: -1 if guide.guide_id is None else guide.guide_id,
-    )
+    ordered = sorted(guides, key=lambda guide: guide.guide_id)
     if len(ordered) < 2:
         return []
 

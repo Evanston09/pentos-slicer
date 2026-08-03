@@ -24,10 +24,9 @@ def load_scene(content: bytes) -> AppState:
         model_xy_position=list(manifest["model_xy_position"]),
         model_z_degrees=manifest["model_z_degrees"],
         plane_snapshots=[
-            PlaneSnapshot.from_dict(snapshot)
-            for snapshot in manifest["plane_snapshots"]
+            PlaneSnapshot.from_dict(snapshot, plane_id)
+            for plane_id, snapshot in enumerate(manifest["plane_snapshots"])
         ],
-        gcode_path=None,
         debug_mode=manifest["debug_mode"],
     )
 

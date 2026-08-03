@@ -51,11 +51,7 @@ class NonplanarController:
         self.view = view
         self.next_guide_id = (
             max(
-                (
-                    guide.guide_id
-                    for guide in self.state.guide_surfaces
-                    if guide.guide_id is not None
-                ),
+                (guide.guide_id for guide in self.state.guide_surfaces),
                 default=-1,
             )
             + 1
@@ -85,8 +81,6 @@ class NonplanarController:
         bend_y: float,
     ) -> None:
         guide = self._find_guide(guide_id)
-        if guide is None:
-            return
         guide.position = np.array(position)
         guide.wxyz = np.array(wxyz)
         guide.bend_x = bend_x
@@ -111,10 +105,10 @@ class NonplanarController:
         ray_direction: np.ndarray,
     ) -> bool:
         model = transformed_model(self.state)
-        guide = self._find_guide(guide_id)
-        if model is None or guide is None:
+        if model is None:
             return False
 
+        guide = self._find_guide(guide_id)
         mesh, _ = model
         locations, _, face_indices = mesh.ray.intersects_location(
             [ray_origin], [ray_direction]
@@ -151,12 +145,7 @@ class NonplanarController:
         self.next_guide_id += 1
         return guide_id
 
-    def _find_guide(self, guide_id: int) -> GuideSurfaceSnapshot | None:
+    def _find_guide(self, guide_id: int) -> GuideSurfaceSnapshot:
         return next(
-            (
-                guide
-                for guide in self.state.guide_surfaces
-                if guide.guide_id == guide_id
-            ),
-            None,
+            guide for guide in self.state.guide_surfaces if guide.guide_id == guide_id
         )

@@ -41,8 +41,6 @@ class PlaneEditorView:
         self.planes: dict[int, PlaneState] = {}
 
     def add_plane(self, plane: PlaneSnapshot) -> None:
-        if plane.plane_id is None:
-            raise ValueError("PlaneSnapshot requires a plane_id")
         plane_id = plane.plane_id
         self.pose_editor.add(plane_id, plane.position, plane.wxyz)
         half = PLANE_HALF_SIZE

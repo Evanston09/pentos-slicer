@@ -99,8 +99,9 @@ class SetupController:
         self.upload_dir = workspace.path / "uploads"
         self.slicing_slots = slicing_slots
         self.overhang_threshold_degrees = AutoPlaneConfig().overhang_threshold_degrees
-        self.next_plane_id = 0
-        self._assign_missing_plane_ids()
+        self.next_plane_id = (
+            max((plane.plane_id for plane in state.plane_snapshots), default=-1) + 1
+        )
         self.nonplanar: NonplanarController = NonplanarController(state, view)
 
     def mount(self) -> None:
@@ -183,8 +184,6 @@ class SetupController:
         wxyz: np.ndarray,
     ) -> None:
         plane = self._find_plane(plane_id)
-        if plane is None:
-            return
         plane.position = np.array(position)
         plane.wxyz = self._normalize_quaternion(wxyz)
         self.refresh_overhang_preview()
@@ -203,10 +202,10 @@ class SetupController:
         ray_direction: np.ndarray,
     ) -> bool:
         model = transformed_model(self.state)
-        plane = self._find_plane(plane_id)
-        if model is None or plane is None:
+        if model is None:
             return False
 
+        plane = self._find_plane(plane_id)
         mesh, _ = model
         locations, _, face_indices = mesh.ray.intersects_location(
             [ray_origin], [ray_direction]
@@ -336,7 +335,13 @@ class SetupController:
         self.state.plane_snapshots = loaded_state.plane_snapshots
         self.state.gcode_path = None
         self.state.debug_mode = loaded_state.debug_mode
-        self._assign_missing_plane_ids()
+        self.next_plane_id = (
+            max(
+                (plane.plane_id for plane in self.state.plane_snapshots),
+                default=-1,
+            )
+            + 1
+        )
 
         self.view.clear_model_scene()
         self.view.replace_planes(self.state.plane_snapshots)
@@ -370,30 +375,14 @@ class SetupController:
         if model is not None:
             self.view.set_model_out_of_bounds(not model_within_build_volume(model[0]))
 
-    def _assign_missing_plane_ids(self) -> None:
-        used_ids = {
-            plane.plane_id
-            for plane in self.state.plane_snapshots
-            if plane.plane_id is not None
-        }
-        self.next_plane_id = max(used_ids, default=-1) + 1
-        for plane in self.state.plane_snapshots:
-            if plane.plane_id is None:
-                plane.plane_id = self._allocate_plane_id()
-
     def _allocate_plane_id(self) -> int:
         plane_id = self.next_plane_id
         self.next_plane_id += 1
         return plane_id
 
-    def _find_plane(self, plane_id: int) -> PlaneSnapshot | None:
+    def _find_plane(self, plane_id: int) -> PlaneSnapshot:
         return next(
-            (
-                plane
-                for plane in self.state.plane_snapshots
-                if plane.plane_id == plane_id
-            ),
-            None,
+            plane for plane in self.state.plane_snapshots if plane.plane_id == plane_id
         )
 
     @staticmethod

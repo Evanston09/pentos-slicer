@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 import trimesh
@@ -10,7 +11,6 @@ from models import (
     AppState,
     GuideSurfaceSnapshot,
     PlaneSnapshot,
-    DEFAULT_TWEEN_SURFACES_PER_PAIR,
 )
 from views.guide_surface_editor_view import GuideSurfaceEditorView
 from views.plane_editor_view import PlaneEditorView
@@ -23,28 +23,48 @@ MODEL_GIZMO_LINE_WIDTH = 5.0
 MODEL_GIZMO_SCALE = 18.0
 
 
+@dataclass(frozen=True)
+class SetupControls:
+    upload: viser.GuiUploadButtonHandle
+    status: viser.GuiTextHandle
+    model_folder: viser.GuiFolderHandle
+    model_x_position: viser.GuiNumberHandle[float]
+    model_y_position: viser.GuiNumberHandle[float]
+    model_z_rotation: viser.GuiNumberHandle[float]
+    model_reset_button: viser.GuiButtonHandle
+    show_overhangs: viser.GuiCheckboxHandle
+    slicing_mode: viser.GuiButtonGroupHandle
+    planes_folder: viser.GuiFolderHandle
+    add_plane_button: viser.GuiButtonHandle
+    max_auto_planes: viser.GuiNumberHandle[int]
+    auto_planes_button: viser.GuiButtonHandle
+    nonplanar_folder: viser.GuiFolderHandle
+    add_guide_button: viser.GuiButtonHandle
+    show_tweens: viser.GuiCheckboxHandle
+    tween_surface_count: viser.GuiNumberHandle[int]
+    debug_mode: viser.GuiCheckboxHandle
+    export_button: viser.GuiButtonHandle
+    slice_button: viser.GuiButtonHandle
+
+
+@dataclass(frozen=True)
+class ModelScene:
+    frame: viser.FrameHandle
+    mesh: viser.MeshHandle
+    overhang: viser.MeshHandle
+    gizmo: viser.TransformControlsHandle
+    vertices: np.ndarray
+    faces: np.ndarray
+
+
 class SetupView:
     def __init__(self, client: viser.ClientHandle) -> None:
         self.client = client
-        self.controller: SetupController | None = None
-        self.model_frame_handle: Any | None = None
-        self.model_mesh_handle: Any | None = None
-        self.model_overhang_handle: Any | None = None
-        self.model_gizmo_handle: Any | None = None
-        self.model_vertices: np.ndarray | None = None
-        self.model_faces: np.ndarray | None = None
-        self.model_folder: Any | None = None
-        self.model_x_position: Any | None = None
-        self.model_y_position: Any | None = None
-        self.model_z_rotation: Any | None = None
-        self.model_reset_button: Any | None = None
+        self.controller: SetupController
+        self.controls: SetupControls | None = None
+        self.model_scene: ModelScene | None = None
         self.syncing_model_controls = False
-        self.show_overhangs: Any | None = None
         self.show_overhangs_enabled = True
-        self.upload: Any | None = None
-        self.status: Any | None = None
-        self.slicing_mode_control: Any | None = None
-        self.planes_folder: Any | None = None
         self.plane_editor = PlaneEditorView(
             self.client,
             self._handle_plane_changed,
@@ -60,16 +80,6 @@ class SetupView:
             scene_prefix="/setup/guides",
         )
         self.armed_snap_target: tuple[str, int] | None = None
-        self.add_plane_button: Any | None = None
-        self.max_auto_planes: Any | None = None
-        self.auto_planes_button: Any | None = None
-        self.nonplanar_folder: Any | None = None
-        self.add_guide_surface_button: Any | None = None
-        self.show_tweens: Any | None = None
-        self.tween_surface_count: Any | None = None
-        self.debug_mode: Any | None = None
-        self.export_handle: Any | None = None
-        self.slice_button: Any | None = None
 
     def bind_controller(self, controller: SetupController) -> None:
         self.controller = controller
@@ -77,65 +87,65 @@ class SetupView:
     def mount(self, state: AppState) -> None:
         self.plane_editor.set_visible(True)
         self.guide_surface_editor.set_visible(False)
-        self.upload = self.client.gui.add_upload_button(
+        upload = self.client.gui.add_upload_button(
             "Upload Model/Scene",
             mime_type=".stl,.3mf,.obj,.ply,.pentos",
         )
-        self.status = self.client.gui.add_text(
+        status = self.client.gui.add_text(
             "Status",
             "No model loaded",
             disabled=True,
         )
 
-        self.model_folder = self.client.gui.add_folder(
+        model_folder = self.client.gui.add_folder(
             "Model",
             expand_by_default=True,
         )
-        with self.model_folder:
-            self.model_x_position = self.client.gui.add_number(
+        with model_folder:
+            model_x_position = self.client.gui.add_number(
                 "X Position",
                 state.model_xy_position[0],
                 step=1.0,
                 disabled=state.current_model is None,
             )
-            self.model_y_position = self.client.gui.add_number(
+            model_y_position = self.client.gui.add_number(
                 "Y Position",
                 state.model_xy_position[1],
                 step=1.0,
                 disabled=state.current_model is None,
             )
-            self.model_z_rotation = self.client.gui.add_number(
+            model_z_rotation = self.client.gui.add_number(
                 "Rotation Z",
                 state.model_z_degrees,
                 step=1.0,
                 disabled=state.current_model is None,
             )
-            self.model_reset_button = self.client.gui.add_button(
+            model_reset_button = self.client.gui.add_button(
                 "Reset Placement",
                 disabled=state.current_model is None,
             )
-            self.show_overhangs = self.client.gui.add_checkbox(
+            show_overhangs = self.client.gui.add_checkbox(
                 "Show Overhangs",
                 self.show_overhangs_enabled,
                 disabled=state.current_model is None,
             )
 
-        self.slicing_mode_control = self.client.gui.add_button_group(
+        slicing_mode = self.client.gui.add_button_group(
             "Slicing Mode",
             ("Multiplanar", "Nonplanar"),
         )
 
-        self.planes_folder = self.client.gui.add_folder(
+        planes_folder = self.client.gui.add_folder(
             "Multiplanar",
             expand_by_default=True,
         )
-        self.plane_editor.pose_editor.gui_container = self.planes_folder
-        with self.planes_folder:
-            self.add_plane_button = self.client.gui.add_button(
+        self.plane_editor.pose_editor.gui_container = planes_folder
+        with planes_folder:
+            add_plane_button = self.client.gui.add_button(
                 "Add Plane",
                 icon=viser.Icon.SQUARES_DIAGONAL,
             )
-            self.max_auto_planes = self.client.gui.add_number(
+            max_auto_planes = self.client.gui.add_number(
                 "Max Auto Planes",
                 2,
                 min=0,
@@ -143,122 +153,131 @@ class SetupView:
                 step=1,
                 disabled=state.current_model is None,
             )
-            self.auto_planes_button = self.client.gui.add_button(
+            auto_planes_button = self.client.gui.add_button(
                 "Auto Planes",
                 disabled=state.current_model is None,
             )
-        self.nonplanar_folder = self.client.gui.add_folder(
+        nonplanar_folder = self.client.gui.add_folder(
             "Nonplanar",
             expand_by_default=True,
             visible=False,
         )
-        self.guide_surface_editor.pose_editor.gui_container = self.nonplanar_folder
-        with self.nonplanar_folder:
-            self.add_guide_surface_button = self.client.gui.add_button(
+        self.guide_surface_editor.pose_editor.gui_container = nonplanar_folder
+        with nonplanar_folder:
+            add_guide_button = self.client.gui.add_button(
                 "Add Guide Surface",
                 icon=viser.Icon.SQUARES_DIAGONAL,
             )
-            self.show_tweens = self.client.gui.add_checkbox(
+            show_tweens = self.client.gui.add_checkbox(
                 "Show Tweens", self.guide_surface_editor.tweens_visible
             )
-            self.tween_surface_count = self.client.gui.add_number(
+            tween_surface_count = self.client.gui.add_number(
                 "Tween Surfaces",
-                (
-                    self.controller.nonplanar.tween_surface_count
-                    if self.controller is not None
-                    else DEFAULT_TWEEN_SURFACES_PER_PAIR
-                ),
+                self.controller.nonplanar.tween_surface_count,
                 min=1,
                 max=50,
                 step=1,
             )
-        self.debug_mode = self.client.gui.add_checkbox(
+        debug_mode = self.client.gui.add_checkbox(
             "Debug Mode",
             state.debug_mode,
         )
-        self.export_handle = self.client.gui.add_button(
+        export_button = self.client.gui.add_button(
             "Export Scene",
             icon=viser.Icon.PACKAGE_EXPORT,
             disabled=state.current_model is None,
         )
-        self.slice_button = self.client.gui.add_button(
+        slice_button = self.client.gui.add_button(
             "Slice",
             icon=viser.Icon.CLOUD_COMPUTING,
         )
+        controls = SetupControls(
+            upload=upload,
+            status=status,
+            model_folder=model_folder,
+            model_x_position=model_x_position,
+            model_y_position=model_y_position,
+            model_z_rotation=model_z_rotation,
+            model_reset_button=model_reset_button,
+            show_overhangs=show_overhangs,
+            slicing_mode=slicing_mode,
+            planes_folder=planes_folder,
+            add_plane_button=add_plane_button,
+            max_auto_planes=max_auto_planes,
+            auto_planes_button=auto_planes_button,
+            nonplanar_folder=nonplanar_folder,
+            add_guide_button=add_guide_button,
+            show_tweens=show_tweens,
+            tween_surface_count=tween_surface_count,
+            debug_mode=debug_mode,
+            export_button=export_button,
+            slice_button=slice_button,
+        )
+        self.controls = controls
 
-        @self.upload.on_upload
+        @controls.upload.on_upload
         def _(event) -> None:
-            if self.controller is None:
-                return
             uploaded = event.target.value
             self.controller.handle_upload(uploaded.name, uploaded.content)
 
-        @self.model_x_position.on_update
+        @controls.model_x_position.on_update
         def _(_) -> None:
             self._handle_model_placement_input()
 
-        @self.model_y_position.on_update
+        @controls.model_y_position.on_update
         def _(_) -> None:
             self._handle_model_placement_input()
 
-        @self.model_z_rotation.on_update
+        @controls.model_z_rotation.on_update
         def _(_) -> None:
             self._handle_model_placement_input()
 
-        @self.model_reset_button.on_click
+        @controls.model_reset_button.on_click
         def _(_) -> None:
-            if self.controller is not None:
-                self.controller.reset_model_placement()
+            self.controller.reset_model_placement()
 
-        @self.show_overhangs.on_update
+        @controls.show_overhangs.on_update
         def _(_) -> None:
-            self.show_overhangs_enabled = self.show_overhangs.value
-            if self.show_overhangs_enabled and self.controller is not None:
+            self.show_overhangs_enabled = controls.show_overhangs.value
+            if self.show_overhangs_enabled:
                 self.controller.refresh_overhang_preview()
             else:
                 self.show_full_model()
 
-        @self.slicing_mode_control.on_click
+        @controls.slicing_mode.on_click
         def _(_) -> None:
-            self.set_slicing_mode(self.slicing_mode_control.value.lower())
+            self.set_slicing_mode(controls.slicing_mode.value.lower())
 
-        @self.add_plane_button.on_click
+        @controls.add_plane_button.on_click
         def _(_) -> None:
-            if self.controller is not None:
-                self.controller.add_plane()
+            self.controller.add_plane()
 
-        @self.auto_planes_button.on_click
+        @controls.auto_planes_button.on_click
         def _(_) -> None:
-            if self.controller is not None and self.max_auto_planes is not None:
-                self.controller.select_auto_planes(
-                    int(round(self.max_auto_planes.value))
-                )
+            self.controller.select_auto_planes(
+                int(round(controls.max_auto_planes.value))
+            )
 
-        @self.add_guide_surface_button.on_click
+        @controls.add_guide_button.on_click
         def _(_) -> None:
-            if self.controller is not None:
-                self.controller.nonplanar.add_guide()
+            self.controller.nonplanar.add_guide()
 
-        @self.show_tweens.on_update
+        @controls.show_tweens.on_update
         def _(_) -> None:
-            self.guide_surface_editor.set_tweens_visible(self.show_tweens.value)
+            self.guide_surface_editor.set_tweens_visible(controls.show_tweens.value)
 
-        @self.tween_surface_count.on_update
+        @controls.tween_surface_count.on_update
         def _(_) -> None:
-            if self.controller is not None:
-                self.controller.nonplanar.set_tween_surface_count(
-                    int(round(self.tween_surface_count.value))
-                )
+            self.controller.nonplanar.set_tween_surface_count(
+                int(round(controls.tween_surface_count.value))
+            )
 
-        @self.debug_mode.on_update
+        @controls.debug_mode.on_update
         def _(_) -> None:
-            if self.controller is not None:
-                self.controller.set_debug_mode(self.debug_mode.value)
+            self.controller.set_debug_mode(controls.debug_mode.value)
 
-        @self.export_handle.on_click
+        @controls.export_button.on_click
         def _(event) -> None:
-            if self.controller is None:
-                return
             download = self.controller.export_scene()
             if download is None:
                 return
@@ -270,15 +289,15 @@ class SetupView:
                 save_immediately=True,
             )
 
-        @self.slice_button.on_click
+        @controls.slice_button.on_click
         def _(_) -> None:
-            if self.controller is not None:
-                self.controller.slice_model()
+            self.controller.slice_model()
 
     def unmount(self) -> None:
-        if self.upload is None:
+        if self.controls is None:
             return
 
+        controls = self.controls
         self.client.scene.remove_click_callback(self._handle_scene_click)
         self.armed_snap_target = None
         self.plane_editor.clear()
@@ -288,69 +307,33 @@ class SetupView:
         self.clear_model_scene()
 
         for handle in (
-            self.slice_button,
-            self.export_handle,
-            self.debug_mode,
-            self.tween_surface_count,
-            self.show_tweens,
-            self.add_guide_surface_button,
-            self.nonplanar_folder,
-            self.auto_planes_button,
-            self.max_auto_planes,
-            self.add_plane_button,
-            self.planes_folder,
-            self.model_reset_button,
-            self.show_overhangs,
-            self.model_z_rotation,
-            self.model_y_position,
-            self.model_x_position,
-            self.model_folder,
-            self.slicing_mode_control,
-            self.status,
-            self.upload,
+            controls.slice_button,
+            controls.export_button,
+            controls.debug_mode,
+            controls.nonplanar_folder,
+            controls.planes_folder,
+            controls.model_folder,
+            controls.slicing_mode,
+            controls.status,
+            controls.upload,
         ):
-            if handle is not None:
-                handle.remove()
+            handle.remove()
 
-        self.upload = None
-        self.status = None
-        self.slicing_mode_control = None
-        self.planes_folder = None
-        self.model_folder = None
-        self.show_overhangs = None
-        self.model_x_position = None
-        self.model_y_position = None
-        self.model_z_rotation = None
-        self.model_reset_button = None
-        self.add_plane_button = None
-        self.max_auto_planes = None
-        self.auto_planes_button = None
-        self.nonplanar_folder = None
-        self.add_guide_surface_button = None
-        self.show_tweens = None
-        self.tween_surface_count = None
-        self.debug_mode = None
-        self.export_handle = None
-        self.slice_button = None
+        self.controls = None
 
     def set_status(self, message: str) -> None:
-        if self.status is not None:
-            self.status.value = message
+        self._mounted().status.value = message
 
     def set_slice_enabled(self, enabled: bool) -> None:
-        if self.slice_button is not None:
-            self.slice_button.disabled = not enabled
+        self._mounted().slice_button.disabled = not enabled
 
     def set_slicing_mode(self, mode: str) -> None:
+        controls = self._mounted()
         multiplanar = mode == "multiplanar"
-        if self.planes_folder is not None:
-            self.planes_folder.visible = multiplanar
-        if self.debug_mode is not None:
-            self.debug_mode.visible = multiplanar
-        if self.slice_button is not None:
-            self.slice_button.visible = multiplanar
-        if self.nonplanar_folder is not None:
-            self.nonplanar_folder.visible = not multiplanar
+        controls.planes_folder.visible = multiplanar
+        controls.debug_mode.visible = multiplanar
+        controls.slice_button.visible = multiplanar
+        controls.nonplanar_folder.visible = not multiplanar
         self.plane_editor.set_visible(multiplanar)
         self.guide_surface_editor.set_visible(not multiplanar)
 
@@ -362,31 +345,31 @@ class SetupView:
         wxyz: np.ndarray,
     ) -> None:
         self.clear_model_scene()
-        self.model_vertices = mesh.vertices - center
-        self.model_faces = mesh.faces
-        self.model_frame_handle = self.client.scene.add_frame(
+        vertices = mesh.vertices - center
+        faces = mesh.faces
+        frame = self.client.scene.add_frame(
             "/setup/model",
             show_axes=False,
             position=position,
             wxyz=wxyz,
         )
-        self.model_mesh_handle = self.client.scene.add_mesh_simple(
+        model_mesh = self.client.scene.add_mesh_simple(
             "/setup/model/mesh",
-            vertices=self.model_vertices,
+            vertices=vertices,
             faces=mesh.faces,
             color=PENTOS_BLUE,
             opacity=0.45,
             side="double",
         )
-        self.model_overhang_handle = self.client.scene.add_mesh_simple(
+        overhang = self.client.scene.add_mesh_simple(
             "/setup/model/overhangs",
-            vertices=self.model_vertices,
+            vertices=vertices,
             faces=np.empty((0, 3)),
             color=OVERHANG_RED,
             opacity=0.85,
             side="double",
         )
-        self.model_gizmo_handle = self.client.scene.add_transform_controls(
+        gizmo = self.client.scene.add_transform_controls(
             "/setup/model_controls",
             scale=MODEL_GIZMO_SCALE,
             line_width=MODEL_GIZMO_LINE_WIDTH,
@@ -396,48 +379,47 @@ class SetupView:
             position=position,
         )
 
-        @self.model_gizmo_handle.on_update
+        self.model_scene = ModelScene(
+            frame=frame,
+            mesh=model_mesh,
+            overhang=overhang,
+            gizmo=gizmo,
+            vertices=vertices,
+            faces=faces,
+        )
+
+        @gizmo.on_update
         def _(_) -> None:
-            if self.controller is not None and self.model_gizmo_handle is not None:
-                self.controller.set_model_placement(
-                    [
-                        self.model_gizmo_handle.position[0],
-                        self.model_gizmo_handle.position[1],
-                    ]
-                )
+            self.controller.set_model_placement([gizmo.position[0], gizmo.position[1]])
 
         self.set_model_controls_enabled(True)
 
     def clear_model_scene(self) -> None:
-        for handle in (
-            self.model_gizmo_handle,
-            self.model_overhang_handle,
-            self.model_mesh_handle,
-            self.model_frame_handle,
-        ):
-            if handle is not None:
-                handle.remove()
+        if self.model_scene is None:
+            return
 
-        self.model_gizmo_handle = None
-        self.model_overhang_handle = None
-        self.model_mesh_handle = None
-        self.model_frame_handle = None
-        self.model_vertices = None
-        self.model_faces = None
+        for handle in (
+            self.model_scene.gizmo,
+            self.model_scene.overhang,
+            self.model_scene.mesh,
+            self.model_scene.frame,
+        ):
+            handle.remove()
+        self.model_scene = None
 
     def set_model_controls_enabled(self, enabled: bool) -> None:
+        controls = self._mounted()
         for handle in (
-            self.model_x_position,
-            self.model_y_position,
-            self.model_z_rotation,
-            self.model_reset_button,
-            self.export_handle,
-            self.show_overhangs,
-            self.max_auto_planes,
-            self.auto_planes_button,
+            controls.model_x_position,
+            controls.model_y_position,
+            controls.model_z_rotation,
+            controls.model_reset_button,
+            controls.export_button,
+            controls.show_overhangs,
+            controls.max_auto_planes,
+            controls.auto_planes_button,
         ):
-            if handle is not None:
-                handle.disabled = not enabled
+            handle.disabled = not enabled
 
     def update_model_placement(
         self,
@@ -446,11 +428,10 @@ class SetupView:
         position: np.ndarray,
         wxyz: np.ndarray,
     ) -> None:
-        if self.model_frame_handle is not None:
-            self.model_frame_handle.position = position
-            self.model_frame_handle.wxyz = wxyz
-        if self.model_gizmo_handle is not None:
-            self.model_gizmo_handle.position = position
+        scene = self._model_scene()
+        scene.frame.position = position
+        scene.frame.wxyz = wxyz
+        scene.gizmo.position = position
         self._sync_model_controls(xy_position, z_degrees)
 
     def show_overhang_faces(
@@ -458,43 +439,32 @@ class SetupView:
         mesh: trimesh.Trimesh,
         overhang_mask: np.ndarray,
     ) -> None:
-        if (
-            not self.show_overhangs_enabled
-            or self.model_frame_handle is None
-            or self.model_mesh_handle is None
-            or self.model_overhang_handle is None
-        ):
+        if not self.show_overhangs_enabled:
             self.show_full_model()
             return
 
-        rotation = trimesh.transformations.quaternion_matrix(
-            self.model_frame_handle.wxyz
-        )[:3, :3]
-        vertices = (mesh.vertices - self.model_frame_handle.position) @ rotation
-        self.model_mesh_handle.vertices = vertices
-        self.model_mesh_handle.faces = mesh.faces[~overhang_mask]
-        self.model_overhang_handle.vertices = vertices
-        self.model_overhang_handle.faces = mesh.faces[overhang_mask]
-        self.model_overhang_handle.visible = bool(np.any(overhang_mask))
+        scene = self._model_scene()
+        rotation = trimesh.transformations.quaternion_matrix(scene.frame.wxyz)[:3, :3]
+        vertices = np.asarray(
+            (mesh.vertices - scene.frame.position) @ rotation,
+            dtype=np.float32,
+        )
+        scene.mesh.vertices = vertices
+        scene.mesh.faces = mesh.faces[~overhang_mask]
+        scene.overhang.vertices = vertices
+        scene.overhang.faces = mesh.faces[overhang_mask]
+        scene.overhang.visible = bool(np.any(overhang_mask))
 
     def set_model_out_of_bounds(self, out_of_bounds: bool) -> None:
-        if self.model_mesh_handle is not None:
-            self.model_mesh_handle.color = (
-                OVERHANG_RED if out_of_bounds else PENTOS_BLUE
-            )
+        self._model_scene().mesh.color = OVERHANG_RED if out_of_bounds else PENTOS_BLUE
 
     def show_full_model(self) -> None:
-        if (
-            self.model_vertices is None
-            or self.model_faces is None
-            or self.model_mesh_handle is None
-        ):
+        if self.model_scene is None:
             return
 
-        self.model_mesh_handle.vertices = self.model_vertices
-        self.model_mesh_handle.faces = self.model_faces
-        if self.model_overhang_handle is not None:
-            self.model_overhang_handle.visible = False
+        self.model_scene.mesh.vertices = self.model_scene.vertices
+        self.model_scene.mesh.faces = self.model_scene.faces
+        self.model_scene.overhang.visible = False
 
     def replace_planes(self, planes: list[PlaneSnapshot]) -> None:
         self.plane_editor.replace_planes(planes)
@@ -515,8 +485,7 @@ class SetupView:
         self.plane_editor.set_plane_pose(plane_id, position, wxyz)
 
     def set_debug_mode_value(self, enabled: bool) -> None:
-        if self.debug_mode is not None:
-            self.debug_mode.value = enabled
+        self._mounted().debug_mode.value = enabled
 
     def replace_guide_surfaces(
         self,
@@ -558,37 +527,36 @@ class SetupView:
         xy_position: list[float],
         z_degrees: float,
     ) -> None:
-        if (
-            self.model_x_position is None
-            or self.model_y_position is None
-            or self.model_z_rotation is None
-        ):
-            return
-
+        controls = self._mounted()
         self.syncing_model_controls = True
         try:
-            self.model_x_position.value = xy_position[0]
-            self.model_y_position.value = xy_position[1]
-            self.model_z_rotation.value = z_degrees
+            controls.model_x_position.value = xy_position[0]
+            controls.model_y_position.value = xy_position[1]
+            controls.model_z_rotation.value = z_degrees
         finally:
             self.syncing_model_controls = False
 
+    def _mounted(self) -> SetupControls:
+        if self.controls is None:
+            raise RuntimeError("Setup view is not mounted")
+        return self.controls
+
+    def _model_scene(self) -> ModelScene:
+        if self.model_scene is None:
+            raise RuntimeError("No model is displayed")
+        return self.model_scene
+
     def _handle_model_placement_input(self) -> None:
-        if (
-            self.syncing_model_controls
-            or self.controller is None
-            or self.model_x_position is None
-            or self.model_y_position is None
-            or self.model_z_rotation is None
-        ):
+        if self.syncing_model_controls:
             return
 
+        controls = self._mounted()
         self.controller.set_model_placement(
             [
-                self.model_x_position.value,
-                self.model_y_position.value,
+                controls.model_x_position.value,
+                controls.model_y_position.value,
             ],
-            self.model_z_rotation.value,
+            controls.model_z_rotation.value,
         )
 
     def _handle_plane_changed(
@@ -597,12 +565,10 @@ class SetupView:
         position: np.ndarray,
         wxyz: np.ndarray,
     ) -> None:
-        if self.controller is not None:
-            self.controller.update_plane(plane_id, position, wxyz)
+        self.controller.update_plane(plane_id, position, wxyz)
 
     def _handle_plane_deleted(self, plane_id: int) -> None:
-        if self.controller is not None:
-            self.controller.remove_plane(plane_id)
+        self.controller.remove_plane(plane_id)
 
     def _handle_guide_surface_changed(
         self,
@@ -612,14 +578,10 @@ class SetupView:
         bend_x: float,
         bend_y: float,
     ) -> None:
-        if self.controller is not None:
-            self.controller.nonplanar.update_guide(
-                guide_id, position, wxyz, bend_x, bend_y
-            )
+        self.controller.nonplanar.update_guide(guide_id, position, wxyz, bend_x, bend_y)
 
     def _handle_guide_surface_deleted(self, guide_id: int) -> None:
-        if self.controller is not None:
-            self.controller.nonplanar.remove_guide(guide_id)
+        self.controller.nonplanar.remove_guide(guide_id)
 
     def _arm_plane_snap(self, plane_id: int) -> None:
         self._arm_snap("plane", plane_id)
@@ -640,7 +602,7 @@ class SetupView:
 
     def _handle_scene_click(self, event) -> None:
         target = self.armed_snap_target
-        if target is None or self.controller is None:
+        if target is None:
             return
         kind, item_id = target
         ray_origin = np.array(event.ray_origin)

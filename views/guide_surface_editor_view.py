@@ -43,8 +43,6 @@ class GuideSurfaceEditorView:
         self.tweens_visible = True
 
     def add_guide(self, guide: GuideSurfaceSnapshot) -> None:
-        if guide.guide_id is None:
-            raise ValueError("GuideSurfaceSnapshot requires a guide_id")
         guide_id = guide.guide_id
 
         def add_bend_controls() -> dict[str, Any]:
