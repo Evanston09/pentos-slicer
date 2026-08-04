@@ -23,6 +23,7 @@ from services.model_tools import (
     transformed_model,
     validate_upload,
 )
+from services.nonplanar_gcode import map_gcode_to_original
 from services.project_io import load_scene, save_scene
 from services.session_workspace import SessionWorkspace
 from services.slicing import Slicer
@@ -309,12 +310,23 @@ class SetupController:
                     return
                 try:
                     if self.state.slicing_mode == "nonplanar":
-                        self.view.set_status("Deforming and slicing flattened model...")
-                        deformed, source_name = self.nonplanar.deformed_mesh()
-                        output_path = self.slicer.slice(
+                        self.view.set_status(
+                            "Deforming, slicing, and inverse-mapping model..."
+                        )
+                        deformed, volume, source_name = self.nonplanar.deformed_mesh()
+                        planar_path = self.slicer.slice(
                             deformed,
                             [],
                             f"{source_name}_deformed",
+                        )
+                        output_path = planar_path.with_name(
+                            f"{source_name}_mapped.gcode"
+                        )
+                        output_path.write_text(
+                            map_gcode_to_original(
+                                planar_path.read_text(),
+                                volume,
+                            )
                         )
                     else:
                         self.view.set_status(

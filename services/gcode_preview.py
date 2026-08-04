@@ -32,8 +32,6 @@ def transform_preview_point(
 def parse_gcode_preview(text: str) -> GcodePreview:
     has_seen_layer = False
     in_transition = False
-    a_degrees = 0.0
-    b_degrees = 0.0
     setup_segments: list[list[np.ndarray]] = []
     part_travel_segments: list[list[np.ndarray]] = []
     part_extrusion_segments: list[list[np.ndarray]] = []
@@ -45,12 +43,6 @@ def parse_gcode_preview(text: str) -> GcodePreview:
     for index, line in enumerate(lines):
         parsed = GcodeCommand.parse(line)
         comment = parsed.comment
-
-        if parsed.command in {"G0", "G1"}:
-            if "A" in parsed.args:
-                a_degrees = parsed.args["A"]
-            if "B" in parsed.args:
-                b_degrees = parsed.args["B"]
 
         if comment == "LAYER_CHANGE":
             in_transition = False
@@ -79,16 +71,8 @@ def parse_gcode_preview(text: str) -> GcodePreview:
             continue
 
         if move.has_xyz and move.start_xyz is not None and move.end_xyz is not None:
-            start = transform_preview_point(
-                move.start_xyz,
-                a_degrees,
-                b_degrees,
-            )
-            end = transform_preview_point(
-                move.end_xyz,
-                a_degrees,
-                b_degrees,
-            )
+            start = transform_preview_point(move.start_xyz, *move.start_ab)
+            end = transform_preview_point(move.end_xyz, *move.end_ab)
             segment = [start, end]
             if not in_transition:
                 if not has_seen_layer:

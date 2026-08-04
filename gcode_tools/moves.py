@@ -29,6 +29,9 @@ class GcodeMove:
     extrusion_delta: float
     has_xyz: bool
     is_absolute_xyz: bool
+    is_absolute_extrusion: bool
+    start_ab: np.ndarray
+    end_ab: np.ndarray
 
 
 def xyz_array(position: dict[str, float | None]) -> np.ndarray | None:
@@ -78,6 +81,7 @@ def iter_gcode_moves(lines: Iterable[str]) -> Iterator[GcodeMove]:
             continue
 
         start_xyz = xyz_array(current)
+        start_ab = np.array([current["A"], current["B"]])
         next_position = current.copy()
         extrusion_delta = 0.0
         has_xyz = False
@@ -120,6 +124,9 @@ def iter_gcode_moves(lines: Iterable[str]) -> Iterator[GcodeMove]:
             extrusion_delta=extrusion_delta,
             has_xyz=has_xyz,
             is_absolute_xyz=absolute_xyz,
+            is_absolute_extrusion=absolute_extrusion,
+            start_ab=start_ab,
+            end_ab=np.array([next_position["A"], next_position["B"]]),
         )
 
 

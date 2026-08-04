@@ -293,9 +293,19 @@ def test_slice_dispatches_normal_and_debug_modes() -> None:
     assert state.gcode_path == Path("output/model_debug.gcode")
 
 
-def test_nonplanar_slice_uses_deformed_mesh() -> None:
+def test_nonplanar_slice_uses_deformed_mesh(tmp_path) -> None:
+    class NonplanarFakeSlicer(FakeSlicer):
+        def slice(self, mesh, planes, source_name) -> Path:
+            super().slice(mesh, planes, source_name)
+            path = tmp_path / f"{source_name}.gcode"
+            path.write_text("G90\n")
+            return path
+
     state = AppState(current_model=(trimesh.creation.box(), "model"))
-    controller, view, slicer, navigations = make_controller(state)
+    controller, view, slicer, navigations = make_controller(
+        state,
+        slicer=NonplanarFakeSlicer(),
+    )
     controller.nonplanar.add_guide()
     controller.nonplanar.add_guide()
 
@@ -308,6 +318,7 @@ def test_nonplanar_slice_uses_deformed_mesh() -> None:
     assert planes == []
     assert source_name == "model_deformed"
     assert view.slicing_mode == "nonplanar"
+    assert controller.state.gcode_path == tmp_path / "model_mapped.gcode"
     assert navigations == ["preview"]
 
 

@@ -7,7 +7,11 @@ from trimesh import transformations as tf
 from models import AppState, GuideSurfaceSnapshot, guide_surface_mesh
 from services.auto_planes import quaternion_from_z_to
 from services.model_tools import transformed_model
-from services.volumetric_deformation import solve_guide_deformation, tetrahedralize
+from services.volumetric_deformation import (
+    TetrahedralVolume,
+    solve_guide_deformation,
+    tetrahedralize,
+)
 
 
 class NonplanarViewPort(Protocol):
@@ -59,6 +63,9 @@ class NonplanarController:
         bend_x = 0.0
         bend_y = 0.0
 
+        if model is not None and not self.state.guide_surfaces:
+            position[2] = model[0].bounds[0, 2]
+
         if self.state.guide_surfaces:
             previous = max(
                 self.state.guide_surfaces,
@@ -72,7 +79,7 @@ class NonplanarController:
             if model is not None:
                 projections = model[0].vertices @ normal
                 remaining = float(projections.max() - previous.position @ normal)
-                distance = max(remaining / 2.0, float(np.ptp(projections)) / 10.0)
+                distance = max(remaining, float(np.ptp(projections)) / 10.0)
             position = previous.position + normal * distance
 
         guide = GuideSurfaceSnapshot(
@@ -133,7 +140,7 @@ class NonplanarController:
         self.view.set_guide_surface_pose(guide_id, guide.position, guide.wxyz)
         return True
 
-    def deformed_mesh(self) -> tuple[trimesh.Trimesh, str]:
+    def deformed_mesh(self) -> tuple[trimesh.Trimesh, TetrahedralVolume, str]:
         model = transformed_model(self.state)
         if model is None:
             raise ValueError("Load a model before deforming")
@@ -144,13 +151,13 @@ class NonplanarController:
         volume = tetrahedralize(mesh)
         solve_guide_deformation(volume, self.state.guide_surfaces)
         deformed = trimesh.Trimesh(
-            vertices=volume.deformed_vertices,
+            vertices=volume.deformed_vertices.copy(),
             faces=volume.boundary_faces,
             process=False,
         )
         if not deformed.is_volume:
             raise ValueError("Deformation produced an invalid outer surface")
-        return deformed, source_name
+        return deformed, volume, source_name
 
     def _allocate_guide_id(self) -> int:
         guide_id = self.next_guide_id

@@ -61,6 +61,23 @@ def test_iter_gcode_moves_tracks_modes_and_extrusion() -> None:
     assert not moves[2].is_absolute_xyz
 
 
+def test_iter_gcode_moves_tracks_start_and_end_ab() -> None:
+    moves = list(
+        gcode_tools.iter_gcode_moves(
+            [
+                "G90\n",
+                "G1 X1 Y2 Z3 A10 B20\n",
+                "G1 X2 A15 B25\n",
+            ]
+        )
+    )
+
+    assert_allclose(moves[0].start_ab, [0.0, 0.0])
+    assert_allclose(moves[0].end_ab, [10.0, 20.0])
+    assert_allclose(moves[1].start_ab, [10.0, 20.0])
+    assert_allclose(moves[1].end_ab, [15.0, 25.0])
+
+
 def test_translate_gcode_shifts_only_absolute_xyz_moves() -> None:
     lines = [
         "G90\n",

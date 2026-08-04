@@ -1,8 +1,8 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from rtree import index
-from scipy.sparse import coo_matrix
+from scipy.sparse import coo_matrix, vstack
 from scipy.sparse.linalg._isolve import lsqr
 import tetgen
 import trimesh
@@ -14,6 +14,8 @@ from services.auto_planes import quaternion_from_z_to
 # Full-XYZ local-frame deformation follows S³ DeformFDM (BSD-3-Clause).
 # Tetrahedral inverse mapping follows Joshua Bird's GPL-3.0 S4 Slicer.
 
+BARYCENTRIC_TOLERANCE = 1e-6
+
 
 @dataclass(frozen=True)
 class BarycentricLocations:
@@ -22,11 +24,26 @@ class BarycentricLocations:
 
 
 @dataclass
+class _TetrahedronLocator:
+    points: np.ndarray
+    inverse_edges: np.ndarray
+    spatial_index: index.Index
+    point_tolerance: float
+
+
+@dataclass
 class TetrahedralVolume:
     original_vertices: np.ndarray
     deformed_vertices: np.ndarray
     tetrahedra: np.ndarray
     boundary_faces: np.ndarray
+    scalar_values: np.ndarray | None = None
+    _original_locator: _TetrahedronLocator | None = field(
+        default=None, init=False, repr=False
+    )
+    _deformed_locator: _TetrahedronLocator | None = field(
+        default=None, init=False, repr=False
+    )
 
     def locate_original(self, points: np.ndarray) -> BarycentricLocations:
         """Locate points in the original volume and return barycentric coordinates."""
@@ -45,6 +62,36 @@ class TetrahedralVolume:
         """Map points from the original volume into the deformed volume."""
         locations = self.locate_original(points)
         return self._interpolate(locations, self.deformed_vertices)
+
+    def layer_normals(self, points: np.ndarray) -> np.ndarray:
+        """Return scalar-field normals for points in the original volume."""
+        if self.scalar_values is None:
+            raise ValueError("The volume has no solved layer field")
+        locations = self.locate_original(points)
+        gradients = self.scalar_gradients()[locations.tetrahedron_indices]
+        return gradients / np.linalg.norm(gradients, axis=1, keepdims=True)
+
+    def extrusion_multipliers(self, points: np.ndarray) -> np.ndarray:
+        """Return original-to-deformed tetrahedron volume ratios at points."""
+        locations = self.locate_deformed(points)
+        tetrahedra = self.tetrahedra[locations.tetrahedron_indices]
+        original = np.abs(_tetrahedron_determinants(self.original_vertices, tetrahedra))
+        deformed = np.abs(_tetrahedron_determinants(self.deformed_vertices, tetrahedra))
+        return original / deformed
+
+    def scalar_gradients(self) -> np.ndarray:
+        """Return the constant scalar gradient inside every tetrahedron."""
+        if self.scalar_values is None:
+            raise ValueError("The volume has no solved layer field")
+        differences = (
+            self.scalar_values[self.tetrahedra[:, 1:]]
+            - self.scalar_values[self.tetrahedra[:, :1]]
+        )
+        return np.einsum(
+            "nji,nj->ni",
+            self._locator(self.original_vertices).inverse_edges,
+            differences,
+        )
 
     def _interpolate(
         self,
@@ -65,41 +112,21 @@ class TetrahedralVolume:
         if points.ndim != 2 or points.shape[1] != 3:
             raise ValueError("Points must have shape (n, 3)")
 
-        tetrahedron_points = vertices[self.tetrahedra]
-        edges = np.stack(
-            (
-                tetrahedron_points[:, 1] - tetrahedron_points[:, 0],
-                tetrahedron_points[:, 2] - tetrahedron_points[:, 0],
-                tetrahedron_points[:, 3] - tetrahedron_points[:, 0],
-            ),
-            axis=2,
-        )
-        determinants = np.linalg.det(edges)
-        usable = ~np.isclose(determinants, 0.0)
-        inverse_edges = np.zeros_like(edges)
-        inverse_edges[usable] = np.linalg.inv(edges[usable])
-
-        properties = index.Property()
-        properties.dimension = 3
-        spatial_index = index.Index(properties=properties)
-        lower = tetrahedron_points.min(axis=1)
-        upper = tetrahedron_points.max(axis=1)
-        for tetrahedron_index, (minimum, maximum) in enumerate(zip(lower, upper)):
-            if usable[tetrahedron_index]:
-                spatial_index.insert(
-                    tetrahedron_index,
-                    (*minimum, *maximum),
-                )
-
-        tolerance = 1e-9
-        point_tolerance = tolerance * max(float(np.ptp(vertices)), 1.0)
+        locator = self._locator(vertices)
+        tetrahedron_points = locator.points
+        inverse_edges = locator.inverse_edges
+        spatial_index = locator.spatial_index
+        tolerance = BARYCENTRIC_TOLERANCE
         tetrahedron_indices = np.empty(len(points), dtype=np.int32)
         weights = np.empty((len(points), 4), dtype=np.float64)
 
         for point_index, point in enumerate(points):
             candidates = np.fromiter(
                 spatial_index.intersection(
-                    (*point - point_tolerance, *point + point_tolerance)
+                    (
+                        *point - locator.point_tolerance,
+                        *point + locator.point_tolerance,
+                    )
                 ),
                 dtype=np.int32,
             )
@@ -125,9 +152,7 @@ class TetrahedralVolume:
                     f"Point {point_index} is outside the tetrahedral volume"
                 )
 
-            # ponytail: S4-compatible prototype behavior: if folded tetrahedra
-            # overlap, the first containing cell wins. Replace with injective
-            # deformation if overlapping mappings become a practical problem.
+            # ponytail: preview-only fallback; machine output must reject folds.
             match = int(np.flatnonzero(contained)[0])
             tetrahedron_indices[point_index] = candidates[match]
             point_weights = np.clip(candidate_weights[match], 0.0, 1.0)
@@ -135,165 +160,239 @@ class TetrahedralVolume:
 
         return BarycentricLocations(tetrahedron_indices, weights)
 
-
-def _guide_field(
-    points: np.ndarray,
-    guides: list[GuideSurfaceSnapshot],
-) -> tuple[np.ndarray, np.ndarray]:
-    """Interpolate layer normals and flattened heights from adjacent guide surfaces."""
-    ordered = sorted(guides, key=lambda item: item.guide_id)
-    if not ordered:
-        return np.repeat([[0.0, 0.0, 1.0]], len(points), axis=0), np.zeros(len(points))
-
-    residuals = []
-    normals = []
-    for guide in ordered:
-        rotation = tf.quaternion_matrix(guide.wxyz)[:3, :3]
-        local = (points - guide.position) @ rotation
-        residuals.append(
-            local[:, 2]
-            - guide.bend_x * local[:, 0] ** 2
-            - guide.bend_y * local[:, 1] ** 2
+    def _locator(self, vertices: np.ndarray) -> _TetrahedronLocator:
+        """Build and cache the spatial data used to locate points in a volume."""
+        attribute = (
+            "_original_locator"
+            if vertices is self.original_vertices
+            else "_deformed_locator"
         )
-        local_normals = np.column_stack(
+        cached = getattr(self, attribute)
+        if cached is not None:
+            return cached
+
+        points = vertices[self.tetrahedra]
+        edges = np.stack(
             (
-                -2.0 * guide.bend_x * local[:, 0],
-                -2.0 * guide.bend_y * local[:, 1],
-                np.ones(len(points)),
-            )
+                points[:, 1] - points[:, 0],
+                points[:, 2] - points[:, 0],
+                points[:, 3] - points[:, 0],
+            ),
+            axis=2,
         )
-        world_normals = local_normals @ rotation.T
-        normals.append(
-            world_normals / np.linalg.norm(world_normals, axis=1, keepdims=True)
+        usable = ~np.isclose(np.linalg.det(edges), 0.0)
+        inverse_edges = np.zeros_like(edges)
+        inverse_edges[usable] = np.linalg.inv(edges[usable])
+        properties = index.Property()
+        properties.dimension = 3
+        spatial_index = index.Index(properties=properties)
+        for tetrahedron_index in np.flatnonzero(usable):
+            minimum = points[tetrahedron_index].min(axis=0)
+            maximum = points[tetrahedron_index].max(axis=0)
+            spatial_index.insert(int(tetrahedron_index), (*minimum, *maximum))
+
+        locator = _TetrahedronLocator(
+            points,
+            inverse_edges,
+            spatial_index,
+            BARYCENTRIC_TOLERANCE * max(float(np.ptp(vertices)), 1.0),
         )
-
-    residuals = np.asarray(residuals)
-    normals = np.asarray(normals)
-    if len(ordered) == 1:
-        return normals[0], np.zeros(len(points))
-
-    positions = np.asarray([guide.position for guide in ordered])
-    segments = positions[1:] - positions[:-1]
-    segment_lengths = np.linalg.norm(segments, axis=1)
-    if np.any(np.isclose(segment_lengths, 0.0)):
-        raise ValueError("Adjacent guides must have different positions")
-    relative = points[:, None, :] - positions[:-1][None, :, :]
-    centerline_amounts = np.clip(
-        np.einsum("psi,si->ps", relative, segments) / segment_lengths**2,
-        0.0,
-        1.0,
-    )
-    closest = (
-        positions[:-1][None, :, :]
-        + centerline_amounts[:, :, None] * segments[None, :, :]
-    )
-    segment_indices = np.argmin(
-        np.sum((points[:, None, :] - closest) ** 2, axis=2),
-        axis=1,
-    )
-    point_indices = np.arange(len(points))
-    first_residuals = residuals[segment_indices, point_indices]
-    second_residuals = residuals[segment_indices + 1, point_indices]
-    denominator = first_residuals - second_residuals
-    fallback = centerline_amounts[point_indices, segment_indices]
-    amounts = np.divide(
-        first_residuals,
-        denominator,
-        out=fallback.copy(),
-        where=~np.isclose(denominator, 0.0),
-    )
-    amounts = np.clip(amounts, 0.0, 1.0)
-
-    field_normals = (1.0 - amounts[:, None]) * normals[
-        segment_indices, point_indices
-    ] + amounts[:, None] * normals[segment_indices + 1, point_indices]
-    field_normals /= np.linalg.norm(field_normals, axis=1, keepdims=True)
-    guide_heights = np.concatenate(([0.0], np.cumsum(segment_lengths)))
-    heights = (
-        guide_heights[segment_indices] + amounts * segment_lengths[segment_indices]
-    )
-    return field_normals, heights
+        setattr(self, attribute, locator)
+        return locator
 
 
-def guide_target_rotations(
+def solve_guide_scalar_field(
     volume: TetrahedralVolume,
     guides: list[GuideSurfaceSnapshot],
 ) -> np.ndarray:
-    """Compute a smoothed target rotation for every tetrahedron from the guide field."""
-    centroids = volume.original_vertices[volume.tetrahedra].mean(axis=1)
-    normals, _ = _guide_field(centroids, guides)
-    neighbors = _tetrahedron_neighbors(volume.tetrahedra)
-    for _ in range(2):
-        accumulated = normals.copy()
-        counts = np.ones((len(normals), 1))
-        if len(neighbors):
-            np.add.at(accumulated, neighbors[:, 0], normals[neighbors[:, 1]])
-            np.add.at(accumulated, neighbors[:, 1], normals[neighbors[:, 0]])
-            np.add.at(counts[:, 0], neighbors[:, 0], 1.0)
-            np.add.at(counts[:, 0], neighbors[:, 1], 1.0)
-        normals = accumulated / counts
-        normals /= np.linalg.norm(normals, axis=1, keepdims=True)
+    """Solve the smooth scalar field whose level sets include the guide surfaces."""
+    ordered = sorted(guides, key=lambda item: item.guide_id)
+    if len(ordered) < 2:
+        raise ValueError("Add at least two guides to define the flattened layer range")
 
-    return np.asarray(
-        [
-            tf.quaternion_matrix(quaternion_from_z_to(normal))[:3, :3].T
-            for normal in normals
-        ]
+    positions = np.asarray([guide.position for guide in ordered])
+    segment_lengths = np.linalg.norm(np.diff(positions, axis=0), axis=1)
+    if np.any(np.isclose(segment_lengths, 0.0)):
+        raise ValueError("Adjacent guides must have different positions")
+    guide_heights = np.concatenate(([0.0], np.cumsum(segment_lengths)))
+
+    edges = np.unique(
+        np.sort(
+            volume.tetrahedra[:, ([0, 0, 0, 1, 1, 2], [1, 2, 3, 2, 3, 3])].reshape(
+                -1, 2
+            ),
+            axis=1,
+        ),
+        axis=0,
     )
+    constraints, targets = _guide_constraints(
+        volume.original_vertices,
+        edges,
+        ordered,
+        guide_heights,
+    )
+
+    points = volume.original_vertices[volume.tetrahedra]
+    edge_matrices = np.stack(
+        (
+            points[:, 1] - points[:, 0],
+            points[:, 2] - points[:, 0],
+            points[:, 3] - points[:, 0],
+        ),
+        axis=2,
+    )
+    inverse_edges = np.linalg.inv(edge_matrices)
+    basis_gradients = np.concatenate(
+        (-inverse_edges.sum(axis=1, keepdims=True), inverse_edges),
+        axis=1,
+    )
+    weights = np.sqrt(np.abs(np.linalg.det(edge_matrices)) / 6.0)
+    rows = np.repeat(np.arange(len(volume.tetrahedra) * 3), 4)
+    columns = np.tile(volume.tetrahedra, (1, 3)).ravel()
+    smoothness = coo_matrix(
+        (
+            (basis_gradients * weights[:, None, None]).transpose(0, 2, 1).ravel(),
+            (rows, columns),
+        ),
+        shape=(len(volume.tetrahedra) * 3, len(volume.original_vertices)),
+    ).tocsr()
+
+    guide_normals = np.asarray(
+        [tf.quaternion_matrix(guide.wxyz)[:3, 2] for guide in ordered]
+    )
+    preferred_gradient = guide_normals.mean(axis=0)
+    preferred_gradient /= np.linalg.norm(preferred_gradient)
+    smoothness_targets = (weights[:, None] * preferred_gradient).ravel()
+
+    constraint_weight = 100.0
+    system = vstack((smoothness, constraints * constraint_weight), format="csr")
+    right_hand_side = np.concatenate((smoothness_targets, targets * constraint_weight))
+    scalar_values = lsqr(
+        system,
+        right_hand_side,
+        atol=1e-12,
+        btol=1e-12,
+    )[0]
+    volume.scalar_values = scalar_values
+
+    gradient_lengths = np.linalg.norm(volume.scalar_gradients(), axis=1)
+    if np.any(gradient_lengths < 1e-8):
+        raise ValueError("Guide field contains a zero-gradient region")
+    return scalar_values
 
 
 def solve_guide_deformation(
     volume: TetrahedralVolume,
     guides: list[GuideSurfaceSnapshot],
 ) -> np.ndarray:
-    """Deform a tetrahedral volume so its guide field becomes flat in Z."""
-    if len(guides) < 2:
-        raise ValueError("Add at least two guides to define the flattened layer range")
-    solve_deformation(volume, guide_target_rotations(volume, guides))
-    _, heights = _guide_field(volume.original_vertices, guides)
-    volume.deformed_vertices[:, 2] = heights
+    """Flatten a guide-constrained scalar field through a tetrahedral volume."""
+    heights = solve_guide_scalar_field(volume, guides)
+    gradients = volume.scalar_gradients()
+    volumes = np.abs(
+        _tetrahedron_determinants(volume.original_vertices, volume.tetrahedra)
+    )
+    average_normal = np.average(gradients, axis=0, weights=volumes)
+    average_normal /= np.linalg.norm(average_normal)
+    rotation = tf.quaternion_matrix(quaternion_from_z_to(average_normal))[:3, :3]
+    deformed_xy = volume.original_vertices @ rotation
+    deformed_xy += volume.original_vertices[0] - deformed_xy[0]
+    volume.deformed_vertices = np.column_stack((deformed_xy[:, :2], heights))
+    volume._deformed_locator = None
+    if np.any(
+        _tetrahedron_determinants(volume.deformed_vertices, volume.tetrahedra) <= 0.0
+    ):
+        raise ValueError("Guide field reverses direction inside the model")
     return volume.deformed_vertices
 
 
-def solve_deformation(
-    volume: TetrahedralVolume,
-    target_rotations: np.ndarray,
-) -> np.ndarray:
-    """Solve shared vertex positions that best match each tetrahedron's target rotation."""
-    tetrahedron_count = len(volume.tetrahedra)
-    target_rotations = np.asarray(target_rotations, dtype=np.float64)
-    if target_rotations.shape != (tetrahedron_count, 3, 3):
-        raise ValueError("Target rotations must have shape (tetrahedra, 3, 3)")
-    if not np.allclose(
-        target_rotations @ np.swapaxes(target_rotations, 1, 2),
-        np.eye(3),
-        atol=1e-6,
-    ) or not np.allclose(np.linalg.det(target_rotations), 1.0, atol=1e-6):
-        raise ValueError("Target matrices must be proper 3D rotations")
+def _guide_constraints(
+    vertices: np.ndarray,
+    edges: np.ndarray,
+    guides: list[GuideSurfaceSnapshot],
+    guide_heights: np.ndarray,
+) -> tuple[coo_matrix, np.ndarray]:
+    """Build scalar-value constraints where guide surfaces cross mesh edges."""
+    row_indices = []
+    column_indices = []
+    values = []
+    targets = []
+    endpoints = vertices[edges]
+    tolerance = 1e-10
 
-    centering = np.eye(4) - np.full((4, 4), 0.25)
-    original_tetrahedra = volume.original_vertices[volume.tetrahedra]
-    targets = (centering @ original_tetrahedra) @ np.swapaxes(target_rotations, 1, 2)
-    rows = np.repeat(np.arange(tetrahedron_count * 4), 4)
-    columns = np.repeat(volume.tetrahedra, 4, axis=0).ravel()
-    system = coo_matrix(
-        (np.tile(centering.ravel(), tetrahedron_count), (rows, columns)),
-        shape=(tetrahedron_count * 4, len(volume.original_vertices)),
-    ).tocsr()
-    deformed = np.column_stack(
-        [
-            lsqr(
-                system,
-                targets[:, :, dimension].ravel(),
-                atol=1e-12,
-                btol=1e-12,
-            )[0]
-            for dimension in range(3)
+    for guide, height in zip(guides, guide_heights):
+        rotation = tf.quaternion_matrix(guide.wxyz)[:3, :3]
+        local = (endpoints - guide.position) @ rotation
+        start = local[:, 0]
+        delta = local[:, 1] - start
+        quadratic = -guide.bend_x * delta[:, 0] ** 2 - guide.bend_y * delta[:, 1] ** 2
+        linear = (
+            delta[:, 2]
+            - 2.0 * guide.bend_x * start[:, 0] * delta[:, 0]
+            - 2.0 * guide.bend_y * start[:, 1] * delta[:, 1]
+        )
+        constant = (
+            start[:, 2]
+            - guide.bend_x * start[:, 0] ** 2
+            - guide.bend_y * start[:, 1] ** 2
+        )
+        roots: list[tuple[int, float]] = []
+        for edge_index in np.flatnonzero(
+            np.isclose(quadratic, 0.0, atol=tolerance)
+            & ~np.isclose(linear, 0.0, atol=tolerance)
+        ):
+            roots.append(
+                (int(edge_index), float(-constant[edge_index] / linear[edge_index]))
+            )
+        discriminants = linear**2 - 4.0 * quadratic * constant
+        for edge_index in np.flatnonzero(
+            ~np.isclose(quadratic, 0.0, atol=tolerance) & (discriminants >= 0.0)
+        ):
+            root = np.sqrt(discriminants[edge_index])
+            roots.extend(
+                (
+                    (
+                        int(edge_index),
+                        float(
+                            (-linear[edge_index] - root) / (2.0 * quadratic[edge_index])
+                        ),
+                    ),
+                    (
+                        int(edge_index),
+                        float(
+                            (-linear[edge_index] + root) / (2.0 * quadratic[edge_index])
+                        ),
+                    ),
+                )
+            )
+        for edge_index in np.flatnonzero(
+            np.isclose(quadratic, 0.0, atol=tolerance)
+            & np.isclose(linear, 0.0, atol=tolerance)
+            & np.isclose(constant, 0.0, atol=tolerance)
+        ):
+            roots.extend(((int(edge_index), 0.0), (int(edge_index), 1.0)))
+
+        accepted = [
+            (edge_index, np.clip(amount, 0.0, 1.0))
+            for edge_index, amount in roots
+            if -tolerance <= amount <= 1.0 + tolerance
         ]
+        if not accepted:
+            raise ValueError(f"Guide {guide.guide_id} does not intersect the model")
+        for edge_index, amount in accepted:
+            row = len(targets)
+            first, second = edges[edge_index]
+            row_indices.extend((row, row))
+            column_indices.extend((first, second))
+            values.extend((1.0 - amount, amount))
+            targets.append(height)
+
+    return (
+        coo_matrix(
+            (values, (row_indices, column_indices)),
+            shape=(len(targets), len(vertices)),
+        ).tocsr(),
+        np.asarray(targets),
     )
-    deformed += volume.original_vertices[0] - deformed[0]
-    volume.deformed_vertices = deformed
-    return deformed
 
 
 def tetrahedralize(mesh: trimesh.Trimesh) -> TetrahedralVolume:
@@ -338,27 +437,6 @@ def tetrahedralize(mesh: trimesh.Trimesh) -> TetrahedralVolume:
         tetrahedra=tetrahedra,
         boundary_faces=boundary_faces,
     )
-
-
-def _tetrahedron_neighbors(tetrahedra: np.ndarray) -> np.ndarray:
-    """Return pairs of tetrahedra that share a triangular face."""
-    face_owners: dict[tuple[int, int, int], int] = {}
-    neighbors = []
-    for tetrahedron_index, tetrahedron in enumerate(tetrahedra):
-        for face in (
-            tetrahedron[[1, 2, 3]],
-            tetrahedron[[0, 2, 3]],
-            tetrahedron[[0, 1, 3]],
-            tetrahedron[[0, 1, 2]],
-        ):
-            first, second, third = sorted(int(vertex) for vertex in face)
-            key = (first, second, third)
-            owner = face_owners.pop(key, -1)
-            if owner == -1:
-                face_owners[key] = tetrahedron_index
-            else:
-                neighbors.append((owner, tetrahedron_index))
-    return np.asarray(neighbors, dtype=np.int32).reshape(-1, 2)
 
 
 def _tetrahedron_determinants(

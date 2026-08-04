@@ -10,9 +10,9 @@ from models import GuideSurfaceSnapshot
 from services.auto_planes import quaternion_from_z_to
 from services.model_tools import load_model
 from services.volumetric_deformation import (
-    guide_target_rotations,
-    solve_deformation,
+    _tetrahedron_determinants,
     solve_guide_deformation,
+    solve_guide_scalar_field,
     tetrahedralize,
 )
 
@@ -69,15 +69,6 @@ def guide(
     )
 
 
-def test_flat_guide_preserves_identity() -> None:
-    volume = tetrahedralize(trimesh.creation.box())
-
-    rotations = guide_target_rotations(volume, [guide(0, [0.0, 0.0, 0.0])])
-    solve_deformation(volume, rotations)
-
-    assert_allclose(volume.deformed_vertices, volume.original_vertices, atol=1e-6)
-
-
 def test_guide_deformation_maps_guides_to_flat_heights() -> None:
     volume = tetrahedralize(trimesh.creation.box())
 
@@ -89,54 +80,45 @@ def test_guide_deformation_maps_guides_to_flat_heights() -> None:
     assert_allclose(
         volume.deformed_vertices[:, 2],
         volume.original_vertices[:, 2] + 0.5,
+        atol=1e-8,
     )
 
 
-def test_uniform_tilt_rotates_full_xyz_volume() -> None:
-    volume = tetrahedralize(trimesh.creation.box())
-    normal = np.array([1.0, 0.0, 2.0]) / np.sqrt(5.0)
-    rotations = guide_target_rotations(
-        volume,
-        [guide(0, [0.0, 0.0, 0.0], normal.tolist())],
-    )
-    anchor = volume.original_vertices[0]
-
-    solve_deformation(volume, rotations)
-
-    expected = (volume.original_vertices - anchor) @ rotations[0].T + anchor
-    assert_allclose(volume.deformed_vertices, expected, atol=1e-4)
-
-
-def test_full_xyz_deformation_handles_large_guide_changes_on_cad_mesh() -> None:
-    mesh = load_model(Path("samples/Part Studio 1.stl"))
-    volume = tetrahedralize(mesh)
+def test_curved_guides_produce_an_injective_scalar_flattening() -> None:
+    volume = tetrahedralize(trimesh.creation.box(extents=[2.0, 2.0, 1.0]))
     guides = [
-        guide(0, [45.0, 45.0, 0.0]),
-        guide(1, [45.0, 45.0, 18.86], [-0.766044, 0.0, 0.642788], bend_y=0.002),
-        guide(2, [32.739, 43.125, 36.764], [-0.996195, 0.0, 0.087156]),
+        guide(0, [0.0, 0.0, -0.4], bend_x=0.05),
+        guide(1, [0.0, 0.0, 0.4], bend_x=0.05),
     ]
 
-    rotations = guide_target_rotations(volume, guides)
-    solve_deformation(volume, rotations)
+    solve_guide_deformation(volume, guides)
 
-    shell = trimesh.Trimesh(
-        vertices=volume.deformed_vertices,
-        faces=volume.boundary_faces,
-        process=False,
+    assert np.all(
+        _tetrahedron_determinants(volume.deformed_vertices, volume.tetrahedra) > 0.0
     )
-    displacement = np.linalg.norm(
-        volume.deformed_vertices - volume.original_vertices,
-        axis=1,
+    normals = volume.layer_normals([[-0.5, 0.0, 0.0], [0.5, 0.0, 0.0]])
+    assert normals[0, 0] > 0.0 > normals[1, 0]
+
+
+def test_harmonic_field_derives_heights_and_normals_from_one_solution() -> None:
+    volume = tetrahedralize(trimesh.creation.box())
+    guides = [guide(0, [0.0, 0.0, -0.5]), guide(1, [0.0, 0.0, 0.5])]
+
+    heights = solve_guide_scalar_field(volume, guides)
+
+    assert_allclose(heights, volume.original_vertices[:, 2] + 0.5, atol=1e-5)
+    assert_allclose(
+        volume.layer_normals([[0.0, 0.0, 0.0]]),
+        [[0.0, 0.0, 1.0]],
+        atol=1e-5,
     )
-    assert shell.is_volume
-    assert np.median(displacement) > 5.0
 
 
 def test_duplicate_guide_positions_are_rejected() -> None:
     volume = tetrahedralize(trimesh.creation.box())
 
     with pytest.raises(ValueError, match="different positions"):
-        guide_target_rotations(
+        solve_guide_scalar_field(
             volume,
             [guide(0, [0.0, 0.0, 0.0]), guide(1, [0.0, 0.0, 0.0])],
         )
@@ -168,6 +150,16 @@ def test_barycentric_mapping_round_trips_affine_deformation() -> None:
     locations = volume.locate_original(source_points)
     assert_allclose(locations.weights.sum(axis=1), 1.0)
     assert np.all(locations.weights >= 0.0)
+
+
+def test_barycentric_mapping_tolerates_rounded_boundary_points() -> None:
+    volume = tetrahedralize(trimesh.creation.box())
+    point = volume.original_vertices[[0]].copy()
+    point[0, 2] -= 5e-7
+
+    mapped = volume.map_to_deformed(point)
+
+    assert_allclose(mapped, volume.original_vertices[[0]], atol=1e-6)
 
 
 def test_barycentric_mapping_rejects_outside_points() -> None:
