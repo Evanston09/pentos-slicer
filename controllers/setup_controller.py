@@ -37,6 +37,8 @@ class SetupViewPort(NonplanarViewPort, Protocol):
 
     def set_slice_enabled(self, enabled: bool) -> None: ...
 
+    def set_slicing_mode(self, mode: str) -> None: ...
+
     def show_mesh(
         self,
         mesh: trimesh.Trimesh,
@@ -106,6 +108,7 @@ class SetupController:
 
     def mount(self) -> None:
         self.view.mount(self.state)
+        self.view.set_slicing_mode(self.state.slicing_mode)
         self.view.replace_planes(self.state.plane_snapshots)
         self.nonplanar.mount()
         if self.state.current_model is not None:
@@ -223,6 +226,12 @@ class SetupController:
     def set_debug_mode(self, enabled: bool) -> None:
         self.state.debug_mode = enabled
 
+    def set_slicing_mode(self, mode: str) -> None:
+        if mode not in {"multiplanar", "nonplanar"}:
+            raise ValueError(f"Unknown slicing mode: {mode}")
+        self.state.slicing_mode = mode
+        self.view.set_slicing_mode(mode)
+
     def refresh_overhang_preview(self) -> None:
         model = transformed_model(self.state)
         if model is None:
@@ -299,23 +308,32 @@ class SetupController:
                     self.view.set_status("Server is busy slicing other models")
                     return
                 try:
-                    self.view.set_status(
-                        "Generating debug transition check..."
-                        if self.state.debug_mode
-                        else "Slicing..."
-                    )
-                    if self.state.debug_mode:
-                        output_path = self.slicer.debug_transition_check(
-                            mesh,
-                            self.state.plane_snapshots,
-                            source_name,
+                    if self.state.slicing_mode == "nonplanar":
+                        self.view.set_status("Deforming and slicing flattened model...")
+                        deformed, source_name = self.nonplanar.deformed_mesh()
+                        output_path = self.slicer.slice(
+                            deformed,
+                            [],
+                            f"{source_name}_deformed",
                         )
                     else:
-                        output_path = self.slicer.slice(
-                            mesh,
-                            self.state.plane_snapshots,
-                            source_name,
+                        self.view.set_status(
+                            "Generating debug transition check..."
+                            if self.state.debug_mode
+                            else "Slicing..."
                         )
+                        if self.state.debug_mode:
+                            output_path = self.slicer.debug_transition_check(
+                                mesh,
+                                self.state.plane_snapshots,
+                                source_name,
+                            )
+                        else:
+                            output_path = self.slicer.slice(
+                                mesh,
+                                self.state.plane_snapshots,
+                                source_name,
+                            )
                 finally:
                     self.slicing_slots.release()
         except Exception as exc:
@@ -333,6 +351,8 @@ class SetupController:
         self.state.model_xy_position = loaded_state.model_xy_position
         self.state.model_z_degrees = loaded_state.model_z_degrees
         self.state.plane_snapshots = loaded_state.plane_snapshots
+        self.state.guide_surfaces = loaded_state.guide_surfaces
+        self.state.slicing_mode = loaded_state.slicing_mode
         self.state.gcode_path = None
         self.state.debug_mode = loaded_state.debug_mode
         self.next_plane_id = (
@@ -343,8 +363,18 @@ class SetupController:
             + 1
         )
 
+        self.nonplanar.next_guide_id = (
+            max(
+                (guide.guide_id for guide in self.state.guide_surfaces),
+                default=-1,
+            )
+            + 1
+        )
+
         self.view.clear_model_scene()
         self.view.replace_planes(self.state.plane_snapshots)
+        self.view.replace_guide_surfaces(self.state.guide_surfaces)
+        self.view.set_slicing_mode(self.state.slicing_mode)
         self.view.set_debug_mode_value(self.state.debug_mode)
 
         if self.state.current_model is not None:

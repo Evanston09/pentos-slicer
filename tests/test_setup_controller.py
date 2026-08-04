@@ -10,6 +10,7 @@ import trimesh
 import controllers.setup_controller as setup_controller_module
 from controllers.setup_controller import SetupController
 from models import AppState, GuideSurfaceSnapshot
+from services.project_io import save_scene
 
 
 class FakeSetupView:
@@ -23,8 +24,8 @@ class FakeSetupView:
         self.mounted = False
         self.model_out_of_bounds = False
         self.slice_enabled = []
+        self.slicing_mode = "multiplanar"
         self.guides = []
-        self.tweens = []
 
     def mount(self, state: AppState) -> None:
         self.mounted = True
@@ -37,6 +38,9 @@ class FakeSetupView:
 
     def set_slice_enabled(self, enabled: bool) -> None:
         self.slice_enabled.append(enabled)
+
+    def set_slicing_mode(self, mode: str) -> None:
+        self.slicing_mode = mode
 
     def show_mesh(self, mesh, center, position, wxyz) -> None:
         self.mesh = mesh
@@ -86,9 +90,6 @@ class FakeSetupView:
 
     def set_guide_surface_mesh(self, guide_id, vertices, faces) -> None:
         pass
-
-    def replace_tween_surfaces(self, meshes) -> None:
-        self.tweens = meshes
 
 
 class FakeSlicer:
@@ -266,26 +267,17 @@ def test_auto_planes_replace_existing_planes(monkeypatch) -> None:
     assert view.statuses[-1] == "Auto Planes: selected 1 plane(s)"
 
 
-def test_tween_surface_count_updates_preview() -> None:
-    state = AppState(
-        guide_surfaces=[
-            GuideSurfaceSnapshot(
-                np.array([0.0, 0.0, 0.0]),
-                np.array([1.0, 0.0, 0.0, 0.0]),
-                guide_id=0,
-            ),
-            GuideSurfaceSnapshot(
-                np.array([0.0, 0.0, 10.0]),
-                np.array([1.0, 0.0, 0.0, 0.0]),
-                guide_id=1,
-            ),
-        ]
-    )
+def test_added_guides_default_to_parallel_ordered_surfaces() -> None:
+    state = AppState(current_model=(trimesh.creation.box(), "box"))
     controller, view, _, _ = make_controller(state)
 
-    controller.nonplanar.set_tween_surface_count(7)
+    controller.nonplanar.add_guide()
+    controller.nonplanar.add_guide()
 
-    assert len(view.tweens) == 7
+    first, second = controller.state.guide_surfaces
+    assert second.position[2] > first.position[2]
+    assert_allclose(second.wxyz, first.wxyz)
+    assert not any("cross" in status for status in view.statuses)
 
 
 def test_slice_dispatches_normal_and_debug_modes() -> None:
@@ -299,6 +291,24 @@ def test_slice_dispatches_normal_and_debug_modes() -> None:
     assert [call[0] for call in slicer.calls] == ["slice", "debug"]
     assert navigations == ["preview", "preview"]
     assert state.gcode_path == Path("output/model_debug.gcode")
+
+
+def test_nonplanar_slice_uses_deformed_mesh() -> None:
+    state = AppState(current_model=(trimesh.creation.box(), "model"))
+    controller, view, slicer, navigations = make_controller(state)
+    controller.nonplanar.add_guide()
+    controller.nonplanar.add_guide()
+
+    controller.set_slicing_mode("nonplanar")
+    controller.slice_model()
+
+    operation, mesh, planes, source_name = slicer.calls[0]
+    assert operation == "slice"
+    assert mesh.is_volume
+    assert planes == []
+    assert source_name == "model_deformed"
+    assert view.slicing_mode == "nonplanar"
+    assert navigations == ["preview"]
 
 
 def test_slice_failure_does_not_navigate() -> None:
@@ -328,6 +338,30 @@ def test_slice_reports_busy_server() -> None:
     assert navigations == []
     assert view.statuses[-1] == "Server is busy slicing other models"
     assert view.slice_enabled == [False, True]
+
+
+def test_loading_nonplanar_project_restores_guides_and_mode() -> None:
+    project = AppState(
+        current_model=(trimesh.creation.box(), "project"),
+        guide_surfaces=[
+            GuideSurfaceSnapshot(
+                position=np.array([0.0, 0.0, 0.0]),
+                wxyz=np.array([1.0, 0.0, 0.0, 0.0]),
+                guide_id=4,
+            )
+        ],
+        slicing_mode="nonplanar",
+    )
+    controller, view, _, _ = make_controller()
+
+    controller.handle_upload("project.pentos", save_scene(project))
+
+    assert controller.state.slicing_mode == "nonplanar"
+    assert len(controller.state.guide_surfaces) == 1
+    assert controller.state.guide_surfaces[0].guide_id == 0
+    assert view.guides == controller.state.guide_surfaces
+    assert view.slicing_mode == "nonplanar"
+    assert controller.nonplanar.next_guide_id == 1
 
 
 def test_export_returns_scene_filename_and_bytes() -> None:

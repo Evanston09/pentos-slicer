@@ -4,7 +4,7 @@ import zipfile
 
 import trimesh
 
-from models import AppState, PlaneSnapshot
+from models import AppState, GuideSurfaceSnapshot, PlaneSnapshot
 from services.model_tools import source_name_from_filename, validate_mesh
 
 
@@ -15,6 +15,10 @@ def load_scene(content: bytes) -> AppState:
 
     mesh = trimesh.load_mesh(io.BytesIO(model_bytes), file_type="3mf")
     validate_mesh(mesh)
+
+    slicing_mode = manifest.get("slicing_mode", "multiplanar")
+    if slicing_mode not in {"multiplanar", "nonplanar"}:
+        raise ValueError(f"Unknown slicing mode: {slicing_mode}")
 
     return AppState(
         current_model=(
@@ -27,6 +31,11 @@ def load_scene(content: bytes) -> AppState:
             PlaneSnapshot.from_dict(snapshot, plane_id)
             for plane_id, snapshot in enumerate(manifest["plane_snapshots"])
         ],
+        guide_surfaces=[
+            GuideSurfaceSnapshot.from_dict(snapshot, guide_id)
+            for guide_id, snapshot in enumerate(manifest.get("guide_surfaces", []))
+        ],
+        slicing_mode=slicing_mode,
         debug_mode=manifest["debug_mode"],
     )
 
@@ -41,11 +50,13 @@ def save_scene(state: AppState) -> bytes:
 
     manifest = {
         "format": "pentos",
-        "version": 1,
+        "version": 2,
         "original_model_name": model_name,
         "model_xy_position": state.model_xy_position,
         "model_z_degrees": state.model_z_degrees,
         "plane_snapshots": [snapshot.as_dict() for snapshot in state.plane_snapshots],
+        "guide_surfaces": [snapshot.as_dict() for snapshot in state.guide_surfaces],
+        "slicing_mode": state.slicing_mode,
         "debug_mode": state.debug_mode,
     }
 

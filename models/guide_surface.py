@@ -1,11 +1,10 @@
 from dataclasses import dataclass
+from typing import Self
 
 import numpy as np
-from trimesh import transformations as tf
 
 GUIDE_HALF_SIZE = 50.0
 GUIDE_GRID_SIZE = 11
-DEFAULT_TWEEN_SURFACES_PER_PAIR = 4
 
 
 @dataclass
@@ -15,6 +14,24 @@ class GuideSurfaceSnapshot:
     guide_id: int
     bend_x: float = 0.0
     bend_y: float = 0.0
+
+    @classmethod
+    def from_dict(cls, data: dict, guide_id: int) -> Self:
+        return cls(
+            position=np.array(data["position"]),
+            wxyz=np.array(data["wxyz"]),
+            guide_id=guide_id,
+            bend_x=float(data.get("bend_x", 0.0)),
+            bend_y=float(data.get("bend_y", 0.0)),
+        )
+
+    def as_dict(self) -> dict[str, list[float] | float]:
+        return {
+            "position": self.position.tolist(),
+            "wxyz": self.wxyz.tolist(),
+            "bend_x": self.bend_x,
+            "bend_y": self.bend_y,
+        }
 
 
 def guide_surface_mesh(
@@ -43,50 +60,3 @@ def guide_surface_mesh(
                 )
             )
     return vertices, np.array(faces)
-
-
-def tween_surface_meshes(
-    guides: list[GuideSurfaceSnapshot],
-    count: int = DEFAULT_TWEEN_SURFACES_PER_PAIR,
-) -> list[tuple[np.ndarray, np.ndarray]]:
-    """Tween adjacent guides by ID using their shortest whole-grid alignment."""
-    ordered = sorted(guides, key=lambda guide: guide.guide_id)
-    if len(ordered) < 2:
-        return []
-
-    index_grid = np.arange(GUIDE_GRID_SIZE**2).reshape(GUIDE_GRID_SIZE, GUIDE_GRID_SIZE)
-    rotations = [np.rot90(index_grid, turns).ravel() for turns in range(4)]
-
-    previous, previous_normal = _world_geometry(ordered[0])
-    _, faces = guide_surface_mesh(0.0, 0.0)
-    tweens = []
-
-    for guide in ordered[1:]:
-        vertices, normal = _world_geometry(guide)
-
-        if previous_normal @ normal <= 0.0:
-            raise ValueError(
-                f"Guide {guide.guide_id} faces away from the previous guide"
-            )
-
-        # Find the shortest whole-grid rotation.
-        current = min(
-            (vertices[rotation] for rotation in rotations),
-            key=lambda candidate: np.sum((candidate - previous) ** 2),
-        )
-
-        for step in range(1, count + 1):
-            amount = step / (count + 1)
-            tweens.append(((1.0 - amount) * previous + amount * current, faces))
-
-        previous = current
-        previous_normal = normal
-
-    return tweens
-
-
-# TODO: Perhaps add arrow later to visualize to better understand the normal
-def _world_geometry(guide: GuideSurfaceSnapshot) -> tuple[np.ndarray, np.ndarray]:
-    vertices, _ = guide_surface_mesh(guide.bend_x, guide.bend_y)
-    rotation = tf.quaternion_matrix(guide.wxyz)[:3, :3]
-    return vertices @ rotation.T + guide.position, rotation[:, 2]

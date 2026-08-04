@@ -40,8 +40,6 @@ class SetupControls:
     auto_planes_button: viser.GuiButtonHandle
     nonplanar_folder: viser.GuiFolderHandle
     add_guide_button: viser.GuiButtonHandle
-    show_tweens: viser.GuiCheckboxHandle
-    tween_surface_count: viser.GuiNumberHandle[int]
     debug_mode: viser.GuiCheckboxHandle
     export_button: viser.GuiButtonHandle
     slice_button: viser.GuiButtonHandle
@@ -168,16 +166,6 @@ class SetupView:
                 "Add Guide Surface",
                 icon=viser.Icon.SQUARES_DIAGONAL,
             )
-            show_tweens = self.client.gui.add_checkbox(
-                "Show Tweens", self.guide_surface_editor.tweens_visible
-            )
-            tween_surface_count = self.client.gui.add_number(
-                "Tween Surfaces",
-                self.controller.nonplanar.tween_surface_count,
-                min=1,
-                max=50,
-                step=1,
-            )
         debug_mode = self.client.gui.add_checkbox(
             "Debug Mode",
             state.debug_mode,
@@ -207,8 +195,6 @@ class SetupView:
             auto_planes_button=auto_planes_button,
             nonplanar_folder=nonplanar_folder,
             add_guide_button=add_guide_button,
-            show_tweens=show_tweens,
-            tween_surface_count=tween_surface_count,
             debug_mode=debug_mode,
             export_button=export_button,
             slice_button=slice_button,
@@ -246,7 +232,7 @@ class SetupView:
 
         @controls.slicing_mode.on_click
         def _(_) -> None:
-            self.set_slicing_mode(controls.slicing_mode.value.lower())
+            self.controller.set_slicing_mode(controls.slicing_mode.value.lower())
 
         @controls.add_plane_button.on_click
         def _(_) -> None:
@@ -261,16 +247,6 @@ class SetupView:
         @controls.add_guide_button.on_click
         def _(_) -> None:
             self.controller.nonplanar.add_guide()
-
-        @controls.show_tweens.on_update
-        def _(_) -> None:
-            self.guide_surface_editor.set_tweens_visible(controls.show_tweens.value)
-
-        @controls.tween_surface_count.on_update
-        def _(_) -> None:
-            self.controller.nonplanar.set_tween_surface_count(
-                int(round(controls.tween_surface_count.value))
-            )
 
         @controls.debug_mode.on_update
         def _(_) -> None:
@@ -329,10 +305,11 @@ class SetupView:
 
     def set_slicing_mode(self, mode: str) -> None:
         controls = self._mounted()
+        if controls.slicing_mode.value != mode.title():
+            controls.slicing_mode.value = mode.title()
         multiplanar = mode == "multiplanar"
         controls.planes_folder.visible = multiplanar
         controls.debug_mode.visible = multiplanar
-        controls.slice_button.visible = multiplanar
         controls.nonplanar_folder.visible = not multiplanar
         self.plane_editor.set_visible(multiplanar)
         self.guide_surface_editor.set_visible(not multiplanar)
@@ -515,12 +492,6 @@ class SetupView:
         faces: np.ndarray,
     ) -> None:
         self.guide_surface_editor.set_guide_mesh(guide_id, vertices, faces)
-
-    def replace_tween_surfaces(
-        self,
-        meshes: list[tuple[np.ndarray, np.ndarray]],
-    ) -> None:
-        self.guide_surface_editor.replace_tweens(meshes)
 
     def _sync_model_controls(
         self,

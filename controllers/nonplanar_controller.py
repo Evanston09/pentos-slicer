@@ -1,16 +1,13 @@
 from typing import Protocol
 
 import numpy as np
+import trimesh
+from trimesh import transformations as tf
 
-from models import (
-    AppState,
-    GuideSurfaceSnapshot,
-    DEFAULT_TWEEN_SURFACES_PER_PAIR,
-    guide_surface_mesh,
-    tween_surface_meshes,
-)
+from models import AppState, GuideSurfaceSnapshot, guide_surface_mesh
 from services.auto_planes import quaternion_from_z_to
 from services.model_tools import transformed_model
+from services.volumetric_deformation import solve_guide_deformation, tetrahedralize
 
 
 class NonplanarViewPort(Protocol):
@@ -37,11 +34,6 @@ class NonplanarViewPort(Protocol):
         faces: np.ndarray,
     ) -> None: ...
 
-    def replace_tween_surfaces(
-        self,
-        meshes: list[tuple[np.ndarray, np.ndarray]],
-    ) -> None: ...
-
     def set_status(self, message: str) -> None: ...
 
 
@@ -56,21 +48,42 @@ class NonplanarController:
             )
             + 1
         )
-        self.tween_surface_count = DEFAULT_TWEEN_SURFACES_PER_PAIR
 
     def mount(self) -> None:
         self.view.replace_guide_surfaces(self.state.guide_surfaces)
-        self._refresh_tweens()
 
     def add_guide(self) -> None:
+        model = transformed_model(self.state)
+        position = np.zeros(3) if model is None else model[0].bounds.mean(axis=0)
+        wxyz = np.array([1.0, 0.0, 0.0, 0.0])
+        bend_x = 0.0
+        bend_y = 0.0
+
+        if self.state.guide_surfaces:
+            previous = max(
+                self.state.guide_surfaces,
+                key=lambda guide: guide.guide_id,
+            )
+            wxyz = previous.wxyz.copy()
+            bend_x = previous.bend_x
+            bend_y = previous.bend_y
+            normal = tf.quaternion_matrix(wxyz)[:3, 2]
+            distance = 10.0
+            if model is not None:
+                projections = model[0].vertices @ normal
+                remaining = float(projections.max() - previous.position @ normal)
+                distance = max(remaining / 2.0, float(np.ptp(projections)) / 10.0)
+            position = previous.position + normal * distance
+
         guide = GuideSurfaceSnapshot(
-            position=np.zeros(3),
-            wxyz=np.array([1.0, 0.0, 0.0, 0.0]),
+            position=position,
+            wxyz=wxyz,
             guide_id=self._allocate_guide_id(),
+            bend_x=bend_x,
+            bend_y=bend_y,
         )
         self.state.guide_surfaces.append(guide)
         self.view.add_guide_surface(guide)
-        self._refresh_tweens()
 
     def update_guide(
         self,
@@ -89,14 +102,12 @@ class NonplanarController:
             guide_id,
             *guide_surface_mesh(bend_x, bend_y),
         )
-        self._refresh_tweens()
 
     def remove_guide(self, guide_id: int) -> None:
         self.state.guide_surfaces = [
             guide for guide in self.state.guide_surfaces if guide.guide_id != guide_id
         ]
         self.view.remove_guide_surface(guide_id)
-        self._refresh_tweens()
 
     def snap_guide_to_face(
         self,
@@ -120,25 +131,26 @@ class NonplanarController:
         guide.position = locations[hit_index]
         guide.wxyz = quaternion_from_z_to(mesh.face_normals[face_indices[hit_index]])
         self.view.set_guide_surface_pose(guide_id, guide.position, guide.wxyz)
-        self._refresh_tweens()
         return True
 
-    def set_tween_surface_count(self, count: int) -> None:
-        self.tween_surface_count = max(1, count)
-        self._refresh_tweens()
+    def deformed_mesh(self) -> tuple[trimesh.Trimesh, str]:
+        model = transformed_model(self.state)
+        if model is None:
+            raise ValueError("Load a model before deforming")
+        if len(self.state.guide_surfaces) < 2:
+            raise ValueError("Add at least two guide surfaces before deforming")
 
-    def _refresh_tweens(self) -> None:
-        try:
-            meshes = tween_surface_meshes(
-                self.state.guide_surfaces,
-                self.tween_surface_count,
-            )
-        except ValueError as error:
-            self.view.replace_tween_surfaces([])
-            self.view.set_status(str(error))
-            return
-
-        self.view.replace_tween_surfaces(meshes)
+        mesh, source_name = model
+        volume = tetrahedralize(mesh)
+        solve_guide_deformation(volume, self.state.guide_surfaces)
+        deformed = trimesh.Trimesh(
+            vertices=volume.deformed_vertices,
+            faces=volume.boundary_faces,
+            process=False,
+        )
+        if not deformed.is_volume:
+            raise ValueError("Deformation produced an invalid outer surface")
+        return deformed, source_name
 
     def _allocate_guide_id(self) -> int:
         guide_id = self.next_guide_id

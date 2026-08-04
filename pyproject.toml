@@ -8,7 +8,9 @@ requires-python = ">=3.13"
 dependencies = [
     "lxml>=6.1.1",
     "rtree>=1.4.1",
+    "scipy>=1.17.1",
     "shapely>=2.1.2",
+    "tetgen>=0.8.4",
     "triangle>=20250106",
     "trimesh[recommend]>=4.12.2",
     "viser>=1.0.30",
