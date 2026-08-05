@@ -6,8 +6,11 @@ from typing import Protocol
 import numpy as np
 import trimesh
 
-import gcode_tools
 from machine import BUILD_PLATE_CENTER, ROTATION_CENTER, rotation_matrix
+from services.multiplanar_gcode import (
+    generate_debug_transition_check,
+    merge_gcode_files,
+)
 
 CONTINUATION_RESTART_EXTRA_MM = 0.25
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "pentos_config.ini"
@@ -99,7 +102,8 @@ class Slicer:
             raise ValueError("No chunks were generated")
 
         gcode_paths = self.run_prusa_slicer(chunks)
-        return self.merge_gcode_files(gcode_paths, chunks, source_name)
+        output_path = self.out_dir / f"{source_name}.gcode"
+        return merge_gcode_files(gcode_paths, chunks, output_path)
 
     def debug_transition_check(
         self,
@@ -113,7 +117,7 @@ class Slicer:
 
         gcode_paths = self.run_prusa_slicer(chunks)
         output_path = self.out_dir / f"{source_name}_debug.gcode"
-        return gcode_tools.generate_debug_transition_check(
+        return generate_debug_transition_check(
             gcode_paths,
             chunks,
             output_path,
@@ -189,15 +193,6 @@ class Slicer:
             )
 
         return overrides
-
-    def merge_gcode_files(
-        self,
-        gcode_paths: list[Path],
-        chunks: list[Chunk],
-        source_name: str,
-    ) -> Path:
-        output_path = self.out_dir / f"{source_name}.gcode"
-        return gcode_tools.merge_gcode_files(gcode_paths, chunks, output_path)
 
     def export_stl_chunks(
         self, mesh: trimesh.Trimesh, planes: list[SlicePlane], source_name: str

@@ -41,12 +41,12 @@ def test_map_gcode_inverse_maps_and_compensates_extrusion() -> None:
         scalar_values=original[:, 2],
     )
     offset = np.asarray(MACHINE_OFFSET)
-    start = offset + [0.2, 0.1, 0.1]
-    end = offset + [0.6, 0.1, 0.1]
+    start = offset + [0.0, 0.1, 0.1]
+    end = offset + [0.4, 0.1, 0.1]
     text = (
         "G90\n"
         "M83\n"
-        f"G1 X{start[0]} Y{start[1]} Z{start[2]}\n"
+        f"G1 X{start[0]} Y{start[1]} Z{start[2]} F600\n"
         ";LAYER_CHANGE\n"
         f"G1 X{end[0]} Y{end[1]} Z{end[2]} E0.9\n"
     )
@@ -59,8 +59,9 @@ def test_map_gcode_inverse_maps_and_compensates_extrusion() -> None:
     moves = list(iter_gcode_moves(mapped.splitlines()))
 
     assert len(moves) == 4
-    assert_allclose(moves[-1].end_xyz, offset + [0.3, 0.1, 0.1])
+    assert_allclose(moves[-1].end_xyz, offset + [0.2, 0.1, 0.1])
     assert_allclose([move.extrusion_delta for move in moves[1:]], [0.15, 0.15, 0.15])
+    assert_allclose([move.feedrate for move in moves[1:]], 300.0)
     assert_allclose(
         [[move.parsed.args["A"], move.parsed.args["B"]] for move in moves[1:]],
         0.0,
