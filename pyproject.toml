@@ -13,7 +13,7 @@ dependencies = [
     "tetgen>=0.8.4",
     "triangle>=20250106",
     "trimesh[recommend]>=4.12.2",
-    "viser>=1.0.30",
+    "viser[urdf]>=1.0.30",
 ]
 
 [dependency-groups]

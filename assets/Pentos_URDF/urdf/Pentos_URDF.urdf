@@ -1,0 +1,337 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com)
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="Pentos_URDF">
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="0.0747239028213642 0.0216590748051974 0.154939691549912"
+        rpy="0 0 0" />
+      <mass
+        value="2.44099684477733" />
+      <inertia
+        ixx="0.0122367808827102"
+        ixy="-3.25811799888948E-06"
+        ixz="-4.85147544789333E-05"
+        iyy="0.00935033392158305"
+        iyz="-2.82240215479357E-05"
+        izz="0.00604692557808226" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Pentos_URDF/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.592156862745098 0.666666666666667 0.682352941176471 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Pentos_URDF/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link
+    name="z_gantry_link">
+    <inertial>
+      <origin
+        xyz="0.249134870485967 -0.0447470548386982 0.0077519561658318"
+        rpy="0 0 0" />
+      <mass
+        value="0.310553740300542" />
+      <inertia
+        ixx="7.97937252980871E-05"
+        ixy="-2.26453082150929E-06"
+        ixz="2.79650816463645E-06"
+        iyy="0.000696564553148385"
+        iyz="3.14534468938883E-06"
+        izz="0.000669245237672264" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Pentos_URDF/meshes/z_gantry_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.894117647058823 0.894117647058823 0.894117647058823 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Pentos_URDF/meshes/z_gantry_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="z_joint"
+    type="prismatic">
+    <origin
+      xyz="0.166342895629293 -0.0507916014864869 0.203286678805914"
+      rpy="0 0 3.14159265358979" />
+    <parent
+      link="base_link" />
+    <child
+      link="z_gantry_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0.19"
+      effort="100"
+      velocity="0.02" />
+  </joint>
+  <link
+    name="x_carriage_link">
+    <inertial>
+      <origin
+        xyz="0.00935038832608258 0.00832868488955014 -0.0236072019807475"
+        rpy="0 0 0" />
+      <mass
+        value="0.05699115210364" />
+      <inertia
+        ixx="1.02159104077061E-05"
+        ixy="1.12284411145327E-07"
+        ixz="5.49368759029089E-08"
+        iyy="1.45994797720544E-05"
+        iyz="-1.70366003419414E-07"
+        izz="1.09148359562712E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Pentos_URDF/meshes/x_carriage_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.592156862745098 0.666666666666667 0.682352941176471 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Pentos_URDF/meshes/x_carriage_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="x_joint"
+    type="prismatic">
+    <origin
+      xyz="0.278076030264586 0.00284839851351409 0.0200631567602781"
+      rpy="0 0 0" />
+    <parent
+      link="z_gantry_link" />
+    <child
+      link="x_carriage_link" />
+    <axis
+      xyz="-1 0 0" />
+    <limit
+      lower="0"
+      upper="0.22"
+      effort="100"
+      velocity="0.1" />
+  </joint>
+  <link
+    name=" y_carriage_link">
+    <inertial>
+      <origin
+        xyz="-0.0200414438454702 0.0542651886173939 0.0315951183662987"
+        rpy="0 0 0" />
+      <mass
+        value="0.304512718780742" />
+      <inertia
+        ixx="0.000316504967459479"
+        ixy="-1.58735958115157E-05"
+        ixz="3.66095978532599E-07"
+        iyy="0.000542541236768079"
+        iyz="-1.44773659958855E-07"
+        izz="0.000762920035050571" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Pentos_URDF/meshes/ y_carriage_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Pentos_URDF/meshes/ y_carriage_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="y_joint"
+    type="prismatic">
+    <origin
+      xyz="0.020806880650508 -0.0635410933989454 0.05706"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link=" y_carriage_link" />
+    <axis
+      xyz="0 -1 0" />
+    <limit
+      lower="0"
+      upper="0.15"
+      effort="100"
+      velocity="0.1" />
+  </joint>
+  <link
+    name="a_tilt_link">
+    <inertial>
+      <origin
+        xyz="-0.000776850883536841 0.0696941619302325 -0.0319118465575499"
+        rpy="0 0 0" />
+      <mass
+        value="0.195405248009577" />
+      <inertia
+        ixx="0.000438219926336646"
+        ixy="3.0777020457015E-06"
+        ixz="-1.66762221500591E-06"
+        iyy="8.60973741144243E-05"
+        iyz="-2.27233939696778E-05"
+        izz="0.000430886767645007" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Pentos_URDF/meshes/a_tilt_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.776470588235294 0.756862745098039 0.737254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Pentos_URDF/meshes/a_tilt_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="a_joint"
+    type="revolute">
+    <origin
+      xyz="-0.0208068806505081 -0.0672469682402693 0.105927821239069"
+      rpy="0 0 0" />
+    <parent
+      link=" y_carriage_link" />
+    <child
+      link="a_tilt_link" />
+    <axis
+      xyz="0 -1 0" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="10"
+      velocity="1" />
+  </joint>
+  <link
+    name="b_rotary_link">
+    <inertial>
+      <origin
+        xyz="-0.000171374343915474 8.87702678473157E-06 0.0335556506520981"
+        rpy="0 0 0" />
+      <mass
+        value="0.0638098058529098" />
+      <inertia
+        ixx="2.7638544612993E-05"
+        ixy="3.46989346156794E-07"
+        ixz="-7.94822948573219E-08"
+        iyy="2.68024734780321E-05"
+        iyz="2.69967481022588E-09"
+        izz="5.32759530566525E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Pentos_URDF/meshes/b_rotary_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.498039215686275 0.498039215686275 0.498039215686275 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Pentos_URDF/meshes/b_rotary_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="b_joint"
+    type="revolute">
+    <origin
+      xyz="0.000205120058508817 0.105008579978607 -0.0480788313783624"
+      rpy="0 0 0" />
+    <parent
+      link="a_tilt_link" />
+    <child
+      link="b_rotary_link" />
+    <axis
+      xyz="0.00321170129672137 0 -0.99999484247409" />
+    <limit
+      lower="-3.14159"
+      upper="3.14159"
+      effort="10"
+      velocity="1" />
+  </joint>
+</robot>

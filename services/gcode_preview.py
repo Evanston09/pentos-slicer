@@ -2,7 +2,7 @@ import numpy as np
 
 from gcode_tools import GcodeCommand, iter_gcode_moves
 from machine import MACHINE_OFFSET, ROTATION_CENTER, rotation_matrix
-from models import GcodePreview, GcodePreviewPart
+from models import GcodePreview, GcodePreviewPart, MachinePose
 
 SETUP_COLOR = (255, 130, 0)
 PART_COLORS = [
@@ -36,6 +36,7 @@ def parse_gcode_preview(text: str) -> GcodePreview:
     part_travel_segments: list[list[np.ndarray]] = []
     part_extrusion_segments: list[list[np.ndarray]] = []
     parts: list[GcodePreviewPart] = []
+    machine_poses: list[MachinePose] = []
 
     lines = text.splitlines()
     moves_by_index = {move.index: move for move in iter_gcode_moves(lines)}
@@ -70,6 +71,11 @@ def parse_gcode_preview(text: str) -> GcodePreview:
         if move is None:
             continue
 
+        if move.end_xyz is not None and (
+            move.has_xyz or not np.array_equal(move.start_ab, move.end_ab)
+        ):
+            machine_poses.append(MachinePose(move.end_xyz.copy(), move.end_ab.copy()))
+
         if move.has_xyz and move.start_xyz is not None and move.end_xyz is not None:
             start = transform_preview_point(move.start_xyz, *move.start_ab)
             end = transform_preview_point(move.end_xyz, *move.end_ab)
@@ -91,4 +97,8 @@ def parse_gcode_preview(text: str) -> GcodePreview:
                 color=PART_COLORS[part_index % len(PART_COLORS)],
             )
         )
-    return GcodePreview(setup=np.asarray(setup_segments), parts=parts)
+    return GcodePreview(
+        setup=np.asarray(setup_segments),
+        parts=parts,
+        machine_poses=machine_poses,
+    )

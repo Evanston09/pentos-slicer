@@ -47,8 +47,9 @@ def configure_theme(client: viser.ClientHandle) -> None:
 
 
 def add_build_plate_scene(client: viser.ClientHandle) -> None:
+    client.scene.add_frame("/shared/build_plate", show_axes=False)
     client.scene.add_grid(
-        "/shared/grid",
+        "/shared/build_plate/grid",
         width=BUILD_PLATE_SIZE,
         height=BUILD_PLATE_SIZE,
         cell_size=5.0,
@@ -113,7 +114,7 @@ def add_build_plate_scene(client: viser.ClientHandle) -> None:
         (7, 4),
     )
     client.scene.add_line_segments(
-        "/shared/build_volume/outline",
+        "/shared/build_plate/build_volume/outline",
         points=np.array(
             [[corners[start], corners[end]] for start, end in edge_indices]
         ),

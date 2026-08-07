@@ -11,6 +11,13 @@ class GcodePreviewPart:
 
 
 @dataclass
+class MachinePose:
+    xyz: np.ndarray
+    ab: np.ndarray
+
+
+@dataclass
 class GcodePreview:
     setup: np.ndarray
     parts: list[GcodePreviewPart]
+    machine_poses: list[MachinePose]

@@ -24,6 +24,7 @@ class FakeGui:
     def __init__(self) -> None:
         self.buttons = {}
         self.text = {}
+        self.sliders = {}
 
     def add_text(self, label, value, **kwargs):
         handle = FakeHandle(value)
@@ -35,6 +36,13 @@ class FakeGui:
 
     def add_number(self, label, value, **kwargs):
         return FakeHandle(value)
+
+    def add_slider(self, label, **kwargs):
+        handle = FakeHandle(kwargs["initial_value"])
+        handle.min = kwargs["min"]
+        handle.max = kwargs["max"]
+        self.sliders[label] = handle
+        return handle
 
     def add_button(self, label, **kwargs):
         handle = FakeHandle()
@@ -71,3 +79,4 @@ def test_download_button_sends_gcode_to_initiating_client() -> None:
 
     assert download_client.downloads == [("model.gcode", b"G90\n", True)]
     assert gui.text["Output G-code"].value == "model.gcode"
+    assert gui.sliders["Machine move"].max > gui.sliders["Machine move"].min
