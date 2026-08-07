@@ -1,21 +1,60 @@
 from pathlib import Path
-from typing import Sequence
+from typing import Protocol, Sequence
 
+
+from gcode_tools import (
+    find_first_last_xyz,
+    iter_gcode_moves,
+    remove_leading_retract,
+    translate_gcode,
+    trim_gcode,
+)
 from machine import MACHINE_OFFSET
 
-from .moves import (
-    GcodeChunk,
-    apply_chunk_offsets,
-    find_first_last_xyz,
-    translate_gcode,
-)
-from .transitions import transition
-from .trimming import remove_leading_retract, trim_gcode
+
+class MultiplanarChunk(Protocol):
+    a_degrees: float
+    b_degrees: float
+    z_offset: float
+    flat_xy_offset: list[float]
+
+
+def apply_chunk_offsets(
+    lines: list[str],
+    chunk: MultiplanarChunk,
+) -> list[str]:
+    if not lines:
+        return []
+
+    transformed = list(lines)
+    initial_x, initial_y, initial_z = find_first_last_xyz(lines).first_position
+    flat_position = {"X": initial_x, "Y": initial_y, "Z": initial_z}
+
+    for move in iter_gcode_moves(lines):
+        if move.is_absolute_xyz and move.has_xyz:
+            for key in ("X", "Y", "Z"):
+                if key in move.parsed.args:
+                    flat_position[key] = move.parsed.args[key]
+
+            stripped = move.line.rstrip("\r\n")
+            ending = move.line[len(stripped) :]
+            transformed[move.index] = (
+                move.parsed.build_with_updated_args(
+                    {
+                        "X": flat_position["X"] - chunk.flat_xy_offset[0],
+                        "Y": flat_position["Y"] - chunk.flat_xy_offset[1],
+                        "Z": flat_position["Z"] + chunk.z_offset,
+                    },
+                )
+                + ending
+            )
+
+    return transformed
 
 
 def merge_gcode_files(
     gcode_paths: Sequence[Path],
-    chunks: Sequence[GcodeChunk],
+    chunks: Sequence[MultiplanarChunk],
     output_path: Path,
 ) -> Path:
     if len(gcode_paths) != len(chunks):
@@ -35,7 +74,7 @@ def merge_gcode_files(
             lines = apply_chunk_offsets(lines, chunks[index])
             initial_xyz = find_first_last_xyz(lines).first_position
             final_gcode.extend(
-                transition(
+                _transition(
                     initial_xyz,
                     chunks[index].a_degrees,
                     chunks[index].b_degrees,
@@ -50,7 +89,7 @@ def merge_gcode_files(
 
 def generate_debug_transition_check(
     gcode_paths: Sequence[Path],
-    chunks: Sequence[GcodeChunk],
+    chunks: Sequence[MultiplanarChunk],
     output_path: Path,
 ) -> Path:
     if len(gcode_paths) != len(chunks):
@@ -99,7 +138,7 @@ def generate_debug_transition_check(
             ]
         )
         debug_gcode.extend(
-            transition(
+            _transition(
                 next_bound.first_position,
                 next_chunk.a_degrees,
                 next_chunk.b_degrees,
@@ -121,3 +160,21 @@ def generate_debug_transition_check(
 
     output_path.write_text("".join(debug_gcode))
     return output_path
+
+
+def _transition(
+    initial_xyz: tuple[float, float, float],
+    a_degrees: float,
+    b_degrees: float,
+) -> list[str]:
+    return [
+        "\n; --- PENTOS A/B TRANSITION ---\n",
+        "G91 ; relative movement for safe lift\n",
+        "G1 Z15 F3000\n",
+        "G90 ; absolute movement\n",
+        f"G1 A{a_degrees} B{b_degrees} F1200\n",
+        "; --- PENTOS MOVE TO NEXT CHUNK ---\n",
+        f"G1 X{initial_xyz[0]} Y{initial_xyz[1]} F1200\n",
+        f"G1 Z{initial_xyz[2]} F1200\n",
+        "; --- END PENTOS A/B TRANSITION ---\n",
+    ]

@@ -13,8 +13,21 @@ def imported_modules(path: Path) -> set[str]:
     return modules
 
 
-def test_mvc_import_boundaries() -> None:
+def test_import_boundaries() -> None:
     root = Path(__file__).parents[1]
+
+    for path in (root / "gcode_tools").glob("*.py"):
+        assert not any(
+            module == blocked or module.startswith(f"{blocked}.")
+            for blocked in (
+                "controllers",
+                "machine",
+                "models",
+                "services",
+                "views",
+            )
+            for module in imported_modules(path)
+        )
 
     for path in (root / "controllers").glob("*.py"):
         assert "viser" not in imported_modules(path)

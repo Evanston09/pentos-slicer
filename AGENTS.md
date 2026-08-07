@@ -2,9 +2,20 @@
 
 ## Project Structure & Module Organization
 
-This is a small Python 3.13 slicer application organized into MVC packages. `main.py` starts the Viser UI. `models/` stores shared state, `controllers/` coordinates workflows, `views/` owns Viser rendering, and `services/` contains model I/O, slicing, preview parsing, and integrations. `gcode_tools/` merges generated G-code with Pentos A/B transitions. Shared machine constants live in `machine.py`; colors and UI theme setup live in `views/theming.py`.
+This is a small Python 3.13 slicer application organized into MVC packages. `main.py` starts the Viser UI. `models/` stores shared state, `controllers/` coordinates workflows, `views/` owns Viser rendering, and `services/` contains model I/O, slicing, preview parsing, integrations, and machine-specific G-code workflows. `gcode_tools/` contains reusable G-code parsing and transformation utilities. Shared machine constants live in `machine.py`; colors and UI theme setup live in `views/theming.py`.
 
 Static and sample inputs are kept in `assets/` and `samples/`. `pentos_config.ini` is the PrusaSlicer profile used by the slicing pipeline. Generated or local runtime data belongs in `uploaded_models/`, `temp/`, and `output/`; these paths are ignored and should not be committed.
+
+## Nonplanar Slicer References
+
+Local reference checkouts are available in `reference/`:
+
+- `reference/S3_DeformFDM/` contains the BSD-3-Clause S³-Slicer implementation.
+- `reference/S4_Slicer/` contains the GPL-3.0 S4 Slicer implementation and notebook.
+
+Inspect these when working on tetrahedral deformation, scalar fields, inverse
+mapping, extrusion correction, or multi-axis motion. Pentos is GPL-3.0 licensed,
+so S4 code may be adapted while preserving its copyright and attribution.
 
 ## Build, Test, and Development Commands
 

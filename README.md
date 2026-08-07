@@ -79,9 +79,9 @@ Sample models are available in `samples/`.
 - `models/` stores shared application state, plane snapshots, and preview data.
 - `controllers/` coordinates setup, preview, slicing, export, and navigation.
 - `views/` contains the Viser UI, scene rendering, plane editor, and theme.
-- `services/` contains model/project I/O, preview parsing, auto-plane selection,
-  and slicing.
-- `gcode_tools/` trims and merges generated G-code with Pentos transitions.
+- `services/` contains model/project I/O, slicing, preview parsing, and
+  Pentos-specific G-code workflows.
+- `gcode_tools/` contains reusable G-code parsing and transformation utilities.
 - `machine.py` stores machine geometry constants.
 - `samples/` contains example models and saved Pentos scenes.
 
@@ -119,3 +119,7 @@ uv run python -m compileall .
 
 For visible UI changes, run the app, load a sample model, add a plane, and
 exercise the setup-to-preview flow.
+
+## License
+
+Pentos is licensed under the [GNU General Public License v3.0](LICENSE).

@@ -8,7 +8,7 @@ feature.
 
 ## Decision
 
-The preferred approach is a **tween-controlled scalar field with a
+The preferred approach is a **guide-controlled scalar field with a
 warp-slice-unwarp pipeline**:
 
 1. Pentos suggests a small number of important curved guide surfaces.
@@ -36,11 +36,11 @@ reliably.
 
 ## Terminology
 
-### Tween surfaces
+### Guide surfaces
 
-Tween surfaces are the small set of important layer shapes shown to the user. They
+Guide surfaces are the small set of important layer shapes shown to the user. They
 act like keyframes in animation: the user specifies a few meaningful states and the
-system generates the intermediate states.
+scalar field generates the intermediate layers.
 
 ### Scalar field
 
@@ -107,7 +107,7 @@ feature.
 ## Relationship to Existing Work
 
 The broad method combines established research ideas and should not be described as
-inventing nonplanar deformation or tweened slicing:
+inventing nonplanar deformation or guide-controlled slicing:
 
 - [Print Paths Key-framing](https://doi.org/10.1145/3424630.3425408) uses
   user-defined target curves and interpolated distance fields to generate nonplanar

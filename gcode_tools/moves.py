@@ -1,16 +1,9 @@
 from dataclasses import dataclass
-from typing import Iterable, Iterator, Protocol
+from typing import Iterable, Iterator
 
 import numpy as np
 
 from .commands import GcodeCommand
-
-
-class GcodeChunk(Protocol):
-    a_degrees: float
-    b_degrees: float
-    z_offset: float
-    flat_xy_offset: list[float]
 
 
 @dataclass
@@ -29,6 +22,10 @@ class GcodeMove:
     extrusion_delta: float
     has_xyz: bool
     is_absolute_xyz: bool
+    is_absolute_extrusion: bool
+    feedrate: float | None
+    start_ab: np.ndarray
+    end_ab: np.ndarray
 
 
 def xyz_array(position: dict[str, float | None]) -> np.ndarray | None:
@@ -49,6 +46,7 @@ def iter_gcode_moves(lines: Iterable[str]) -> Iterator[GcodeMove]:
     }
     absolute_xyz = True
     absolute_extrusion = True
+    feedrate: float | None = None
 
     for index, line in enumerate(lines):
         parsed = GcodeCommand.parse(line)
@@ -77,7 +75,11 @@ def iter_gcode_moves(lines: Iterable[str]) -> Iterator[GcodeMove]:
         if command not in {"G0", "G1"}:
             continue
 
+        if "F" in args:
+            feedrate = args["F"]
+
         start_xyz = xyz_array(current)
+        start_ab = np.array([current["A"], current["B"]])
         next_position = current.copy()
         extrusion_delta = 0.0
         has_xyz = False
@@ -120,6 +122,10 @@ def iter_gcode_moves(lines: Iterable[str]) -> Iterator[GcodeMove]:
             extrusion_delta=extrusion_delta,
             has_xyz=has_xyz,
             is_absolute_xyz=absolute_xyz,
+            is_absolute_extrusion=absolute_extrusion,
+            feedrate=feedrate,
+            start_ab=start_ab,
+            end_ab=np.array([next_position["A"], next_position["B"]]),
         )
 
 
@@ -143,40 +149,6 @@ def translate_gcode(lines: list[str], offset: np.ndarray) -> list[str]:
                 )
 
     return translated
-
-
-def apply_chunk_offsets(lines: list[str], chunk: GcodeChunk) -> list[str]:
-    if not lines:
-        return []
-
-    transformed = list(lines)
-    initial_x, initial_y, initial_z = find_first_last_xyz(lines).first_position
-    flat_position = {
-        "X": initial_x,
-        "Y": initial_y,
-        "Z": initial_z,
-    }
-
-    for move in iter_gcode_moves(lines):
-        if move.is_absolute_xyz and move.has_xyz:
-            for key in ("X", "Y", "Z"):
-                if key in move.parsed.args:
-                    flat_position[key] = move.parsed.args[key]
-
-            stripped = move.line.rstrip("\r\n")
-            ending = move.line[len(stripped) :]
-            transformed[move.index] = (
-                move.parsed.build_with_updated_args(
-                    {
-                        "X": flat_position["X"] - chunk.flat_xy_offset[0],
-                        "Y": flat_position["Y"] - chunk.flat_xy_offset[1],
-                        "Z": flat_position["Z"] + chunk.z_offset,
-                    },
-                )
-                + ending
-            )
-
-    return transformed
 
 
 def find_first_last_xyz(lines: list[str]) -> GcodeBounds:

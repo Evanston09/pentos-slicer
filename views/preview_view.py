@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import viser
 
@@ -14,74 +15,80 @@ if TYPE_CHECKING:
 SETUP_COLOR = PENTOS_ORANGE
 
 
+@dataclass(frozen=True)
+class PreviewControls:
+    status: viser.GuiTextHandle
+    output_path: viser.GuiTextHandle
+    show_travel: viser.GuiCheckboxHandle
+    line_width: viser.GuiNumberHandle[float]
+    back_button: viser.GuiButtonHandle
+    download_button: viser.GuiButtonHandle
+
+
 class PreviewView:
     def __init__(self, client: viser.ClientHandle) -> None:
         self.client = client
-        self.controller: PreviewController | None = None
-        self.status: Any | None = None
-        self.output_path: Any | None = None
-        self.show_travel: Any | None = None
-        self.line_width: Any | None = None
-        self.back_button: Any | None = None
-        self.setup_handle: Any | None = None
-        self.download_handle: Any | None = None
-        self.travel_handles: list[Any] = []
-        self.extrusion_handles: list[Any] = []
+        self.controller: PreviewController
+        self.controls: PreviewControls | None = None
+        self.travel_handles: list[viser.LineSegmentsHandle] = []
+        self.extrusion_handles: list[viser.LineSegmentsHandle] = []
 
     def bind_controller(self, controller: PreviewController) -> None:
         self.controller = controller
 
     def mount(self, gcode_path: Path | None) -> None:
-        self.status = self.client.gui.add_text(
+        status = self.client.gui.add_text(
             "Status",
             "Saved G-code",
             disabled=True,
         )
-        self.output_path = self.client.gui.add_text(
+        output_path = self.client.gui.add_text(
             "Output G-code",
             "" if gcode_path is None else gcode_path.name,
             disabled=True,
         )
-        self.show_travel = self.client.gui.add_checkbox("Travel", True)
-        self.line_width = self.client.gui.add_number(
+        show_travel = self.client.gui.add_checkbox("Travel", True)
+        line_width = self.client.gui.add_number(
             "Line width",
             2.0,
             min=1.0,
             max=10.0,
         )
-        self.download_handle = self.client.gui.add_button(
+        download_button = self.client.gui.add_button(
             "Download G-code",
             icon=viser.Icon.DOWNLOAD,
         )
-        self.back_button = self.client.gui.add_button("Back to Setup")
+        back_button = self.client.gui.add_button("Back to Setup")
+        controls = PreviewControls(
+            status=status,
+            output_path=output_path,
+            show_travel=show_travel,
+            line_width=line_width,
+            back_button=back_button,
+            download_button=download_button,
+        )
+        self.controls = controls
 
-        @self.show_travel.on_update
+        @controls.show_travel.on_update
         def _(_) -> None:
-            visible = self.show_travel.value
-            if self.setup_handle is not None:
-                self.setup_handle.visible = visible
+            visible = controls.show_travel.value
             for travel_handle in self.travel_handles:
                 travel_handle.visible = visible
 
-        @self.line_width.on_update
+        @controls.line_width.on_update
         def _(_) -> None:
-            line_width = self.line_width.value
+            width = controls.line_width.value
             for extrusion_handle in self.extrusion_handles:
-                extrusion_handle.line_width = line_width
-            if self.setup_handle is not None:
-                self.setup_handle.line_width = max(1.0, line_width * 0.5)
+                extrusion_handle.line_width = width
             for travel_handle in self.travel_handles:
-                travel_handle.line_width = max(1.0, line_width * 0.5)
+                travel_handle.line_width = max(1.0, width * 0.5)
 
-        @self.back_button.on_click
+        @controls.back_button.on_click
         def _(_) -> None:
-            if self.controller is not None:
-                self.controller.show_setup()
+            self.controller.show_setup()
 
-        @self.download_handle.on_click
+        @controls.download_button.on_click
         def _(event) -> None:
-            if self.controller is None:
-                return
             download = self.controller.download_gcode()
             if download is None:
                 return
@@ -94,22 +101,22 @@ class PreviewView:
             )
 
     def set_status(self, message: str) -> None:
-        if self.status is not None:
-            self.status.value = message
+        self._mounted().status.value = message
 
     def show_preview(self, preview: GcodePreview) -> None:
-        line_width = self.line_width.value if self.line_width is not None else 2.0
-        travel_visible = (
-            self.show_travel.value if self.show_travel is not None else True
-        )
+        controls = self._mounted()
+        line_width = controls.line_width.value
+        travel_visible = controls.show_travel.value
 
         if len(preview.setup):
-            self.setup_handle = self.client.scene.add_line_segments(
-                "/preview/setup",
-                points=preview.setup,
-                colors=SETUP_COLOR,
-                line_width=max(1.0, line_width * 0.5),
-                visible=travel_visible,
+            self.travel_handles.append(
+                self.client.scene.add_line_segments(
+                    "/preview/setup",
+                    points=preview.setup,
+                    colors=SETUP_COLOR,
+                    line_width=max(1.0, line_width * 0.5),
+                    visible=travel_visible,
+                )
             )
 
         for index, part in enumerate(preview.parts):
@@ -135,26 +142,27 @@ class PreviewView:
                 )
 
     def unmount(self) -> None:
+        if self.controls is None:
+            return
+
+        controls = self.controls
         for handle in (
             *self.extrusion_handles,
             *self.travel_handles,
-            self.setup_handle,
-            self.back_button,
-            self.line_width,
-            self.show_travel,
-            self.download_handle,
-            self.output_path,
-            self.status,
+            controls.back_button,
+            controls.line_width,
+            controls.show_travel,
+            controls.download_button,
+            controls.output_path,
+            controls.status,
         ):
-            if handle is not None:
-                handle.remove()
+            handle.remove()
 
-        self.status = None
-        self.output_path = None
-        self.show_travel = None
-        self.line_width = None
-        self.back_button = None
-        self.download_handle = None
-        self.setup_handle = None
+        self.controls = None
         self.travel_handles = []
         self.extrusion_handles = []
+
+    def _mounted(self) -> PreviewControls:
+        if self.controls is None:
+            raise RuntimeError("Preview view is not mounted")
+        return self.controls

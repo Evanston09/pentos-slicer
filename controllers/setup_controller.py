@@ -5,6 +5,7 @@ from typing import Protocol
 import numpy as np
 import trimesh
 
+from controllers.nonplanar_controller import NonplanarController, NonplanarViewPort
 from machine import BUILD_PLATE_CENTER
 from models import AppState, PlaneSnapshot
 from services.auto_planes import (
@@ -22,12 +23,13 @@ from services.model_tools import (
     transformed_model,
     validate_upload,
 )
+from services.nonplanar_gcode import map_gcode_to_original
 from services.project_io import load_scene, save_scene
 from services.session_workspace import SessionWorkspace
 from services.slicing import Slicer
 
 
-class SetupViewPort(Protocol):
+class SetupViewPort(NonplanarViewPort, Protocol):
     def mount(self, state: AppState) -> None: ...
 
     def unmount(self) -> None: ...
@@ -35,6 +37,8 @@ class SetupViewPort(Protocol):
     def set_status(self, message: str) -> None: ...
 
     def set_slice_enabled(self, enabled: bool) -> None: ...
+
+    def set_slicing_mode(self, mode: str) -> None: ...
 
     def show_mesh(
         self,
@@ -98,12 +102,16 @@ class SetupController:
         self.upload_dir = workspace.path / "uploads"
         self.slicing_slots = slicing_slots
         self.overhang_threshold_degrees = AutoPlaneConfig().overhang_threshold_degrees
-        self.next_plane_id = 0
-        self._assign_missing_plane_ids()
+        self.next_plane_id = (
+            max((plane.plane_id for plane in state.plane_snapshots), default=-1) + 1
+        )
+        self.nonplanar: NonplanarController = NonplanarController(state, view)
 
     def mount(self) -> None:
         self.view.mount(self.state)
+        self.view.set_slicing_mode(self.state.slicing_mode)
         self.view.replace_planes(self.state.plane_snapshots)
+        self.nonplanar.mount()
         if self.state.current_model is not None:
             self._show_current_model()
             self.view.set_status(f"Loaded {self.state.current_model[1]}")
@@ -180,8 +188,6 @@ class SetupController:
         wxyz: np.ndarray,
     ) -> None:
         plane = self._find_plane(plane_id)
-        if plane is None:
-            return
         plane.position = np.array(position)
         plane.wxyz = self._normalize_quaternion(wxyz)
         self.refresh_overhang_preview()
@@ -200,10 +206,10 @@ class SetupController:
         ray_direction: np.ndarray,
     ) -> bool:
         model = transformed_model(self.state)
-        plane = self._find_plane(plane_id)
-        if model is None or plane is None:
+        if model is None:
             return False
 
+        plane = self._find_plane(plane_id)
         mesh, _ = model
         locations, _, face_indices = mesh.ray.intersects_location(
             [ray_origin], [ray_direction]
@@ -220,6 +226,12 @@ class SetupController:
 
     def set_debug_mode(self, enabled: bool) -> None:
         self.state.debug_mode = enabled
+
+    def set_slicing_mode(self, mode: str) -> None:
+        if mode not in {"multiplanar", "nonplanar"}:
+            raise ValueError(f"Unknown slicing mode: {mode}")
+        self.state.slicing_mode = mode
+        self.view.set_slicing_mode(mode)
 
     def refresh_overhang_preview(self) -> None:
         model = transformed_model(self.state)
@@ -297,23 +309,43 @@ class SetupController:
                     self.view.set_status("Server is busy slicing other models")
                     return
                 try:
-                    self.view.set_status(
-                        "Generating debug transition check..."
-                        if self.state.debug_mode
-                        else "Slicing..."
-                    )
-                    if self.state.debug_mode:
-                        output_path = self.slicer.debug_transition_check(
-                            mesh,
-                            self.state.plane_snapshots,
-                            source_name,
+                    if self.state.slicing_mode == "nonplanar":
+                        self.view.set_status(
+                            "Deforming, slicing, and inverse-mapping model..."
+                        )
+                        deformed, volume, source_name = self.nonplanar.deformed_mesh()
+                        planar_path = self.slicer.slice(
+                            deformed,
+                            [],
+                            f"{source_name}_deformed",
+                        )
+                        output_path = planar_path.with_name(
+                            f"{source_name}_mapped.gcode"
+                        )
+                        output_path.write_text(
+                            map_gcode_to_original(
+                                planar_path.read_text(),
+                                volume,
+                            )
                         )
                     else:
-                        output_path = self.slicer.slice(
-                            mesh,
-                            self.state.plane_snapshots,
-                            source_name,
+                        self.view.set_status(
+                            "Generating debug transition check..."
+                            if self.state.debug_mode
+                            else "Slicing..."
                         )
+                        if self.state.debug_mode:
+                            output_path = self.slicer.debug_transition_check(
+                                mesh,
+                                self.state.plane_snapshots,
+                                source_name,
+                            )
+                        else:
+                            output_path = self.slicer.slice(
+                                mesh,
+                                self.state.plane_snapshots,
+                                source_name,
+                            )
                 finally:
                     self.slicing_slots.release()
         except Exception as exc:
@@ -331,12 +363,30 @@ class SetupController:
         self.state.model_xy_position = loaded_state.model_xy_position
         self.state.model_z_degrees = loaded_state.model_z_degrees
         self.state.plane_snapshots = loaded_state.plane_snapshots
+        self.state.guide_surfaces = loaded_state.guide_surfaces
+        self.state.slicing_mode = loaded_state.slicing_mode
         self.state.gcode_path = None
         self.state.debug_mode = loaded_state.debug_mode
-        self._assign_missing_plane_ids()
+        self.next_plane_id = (
+            max(
+                (plane.plane_id for plane in self.state.plane_snapshots),
+                default=-1,
+            )
+            + 1
+        )
+
+        self.nonplanar.next_guide_id = (
+            max(
+                (guide.guide_id for guide in self.state.guide_surfaces),
+                default=-1,
+            )
+            + 1
+        )
 
         self.view.clear_model_scene()
         self.view.replace_planes(self.state.plane_snapshots)
+        self.view.replace_guide_surfaces(self.state.guide_surfaces)
+        self.view.set_slicing_mode(self.state.slicing_mode)
         self.view.set_debug_mode_value(self.state.debug_mode)
 
         if self.state.current_model is not None:
@@ -367,30 +417,14 @@ class SetupController:
         if model is not None:
             self.view.set_model_out_of_bounds(not model_within_build_volume(model[0]))
 
-    def _assign_missing_plane_ids(self) -> None:
-        used_ids = {
-            plane.plane_id
-            for plane in self.state.plane_snapshots
-            if plane.plane_id is not None
-        }
-        self.next_plane_id = max(used_ids, default=-1) + 1
-        for plane in self.state.plane_snapshots:
-            if plane.plane_id is None:
-                plane.plane_id = self._allocate_plane_id()
-
     def _allocate_plane_id(self) -> int:
         plane_id = self.next_plane_id
         self.next_plane_id += 1
         return plane_id
 
-    def _find_plane(self, plane_id: int) -> PlaneSnapshot | None:
+    def _find_plane(self, plane_id: int) -> PlaneSnapshot:
         return next(
-            (
-                plane
-                for plane in self.state.plane_snapshots
-                if plane.plane_id == plane_id
-            ),
-            None,
+            plane for plane in self.state.plane_snapshots if plane.plane_id == plane_id
         )
 
     @staticmethod
