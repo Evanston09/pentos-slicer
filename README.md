@@ -44,6 +44,12 @@ Start the local Viser app:
 uv run python main.py
 ```
 
+For development, restart it automatically whenever a Python file changes:
+
+```bash
+./dev.sh
+```
+
 Open the URL printed in the terminal, usually:
 
 ```text
