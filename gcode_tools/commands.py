@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Callable, Self
+from typing import Self
 
 
 @dataclass
@@ -78,9 +78,3 @@ def parse_gcode_args(args: list[str]) -> dict[str, float]:
         key, value = parsed_arg
         parsed_args[key] = value
     return parsed_args
-
-
-# See if necessary when we introduce time mashing
-def is_comment_line(line: str, matches: Callable[[str | None], bool]) -> bool:
-    parsed = GcodeCommand.parse(line)
-    return not parsed.command and matches(parsed.comment)

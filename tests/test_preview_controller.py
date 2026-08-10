@@ -5,6 +5,7 @@ from models import AppState
 class FakePreviewView:
     def __init__(self) -> None:
         self.statuses: list[str] = []
+        self.estimated_time = None
         self.preview = None
         self.path = None
 
@@ -16,6 +17,9 @@ class FakePreviewView:
 
     def set_status(self, message: str) -> None:
         self.statuses.append(message)
+
+    def set_estimated_time(self, estimate: str) -> None:
+        self.estimated_time = estimate
 
     def show_preview(self, preview) -> None:
         self.preview = preview
@@ -32,7 +36,10 @@ def test_missing_gcode_sets_status() -> None:
 
 def test_load_preview_reads_and_parses_gcode(tmp_path) -> None:
     path = tmp_path / "preview.gcode"
-    path.write_text("G90\nM83\n;LAYER_CHANGE\nG1 X68 Y7 Z1\nG1 X69 Y7 Z1 E0.5\n")
+    path.write_text(
+        "; estimated printing time (normal mode) = 1h 2m\n"
+        "G90\nM83\n;LAYER_CHANGE\nG1 X68 Y7 Z1\nG1 X69 Y7 Z1 E0.5\n"
+    )
     view = FakePreviewView()
     controller = PreviewController(
         AppState(gcode_path=path),
@@ -45,6 +52,7 @@ def test_load_preview_reads_and_parses_gcode(tmp_path) -> None:
     assert view.preview is not None
     assert len(view.preview.parts) == 1
     assert view.statuses[-1].startswith("Preview: 1 parts")
+    assert view.estimated_time == "1h 2m"
 
 
 def test_download_returns_gcode_and_reports_status(tmp_path) -> None:

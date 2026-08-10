@@ -1,4 +1,4 @@
-from .commands import GcodeCommand, is_comment_line
+from .commands import GcodeCommand
 
 
 def trim_gcode(
@@ -17,20 +17,14 @@ def trim_gcode(
 
 def remove_end(lines: list[str]) -> list[str]:
     custom_blocks = [
-        i
-        for i, line in enumerate(lines)
-        if is_comment_line(line, lambda comment: comment == "TYPE:Custom")
+        i for i, line in enumerate(lines) if line.strip() == ";TYPE:Custom"
     ]
     return lines[: custom_blocks[-1]] if custom_blocks else lines
 
 
 def remove_start(lines: list[str]) -> list[str]:
     start = next(
-        (
-            i
-            for i, line in enumerate(lines)
-            if is_comment_line(line, lambda comment: comment == "LAYER_CHANGE")
-        ),
+        (i for i, line in enumerate(lines) if line.strip() == ";LAYER_CHANGE"),
         0,
     )
     return lines[start:]
@@ -41,10 +35,7 @@ def remove_leading_retract(lines: list[str]) -> list[str]:
     before_print_type = True
 
     for line in lines:
-        if before_print_type and is_comment_line(
-            line,
-            lambda comment: comment is not None and comment.startswith("TYPE:"),
-        ):
+        if before_print_type and line.lstrip().startswith(";TYPE:"):
             before_print_type = False
 
         parsed = GcodeCommand.parse(line)

@@ -63,6 +63,7 @@ def test_download_button_sends_gcode_to_initiating_client() -> None:
     view = PreviewView(SimpleNamespace(gui=gui, scene=None))
     view.bind_controller(FakeController())
     view.mount(Path("/tmp/private-session/model.gcode"))
+    view.set_estimated_time("1h 2m")
     download_client = FakeDownloadClient()
 
     gui.buttons["Download G-code"].click_callback(
@@ -71,3 +72,4 @@ def test_download_button_sends_gcode_to_initiating_client() -> None:
 
     assert download_client.downloads == [("model.gcode", b"G90\n", True)]
     assert gui.text["Output G-code"].value == "model.gcode"
+    assert gui.text["Estimated time"].value == "1h 2m"

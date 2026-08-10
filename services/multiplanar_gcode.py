@@ -4,7 +4,9 @@ from typing import Protocol, Sequence
 
 from gcode_tools import (
     find_first_last_xyz,
+    format_print_time,
     iter_gcode_moves,
+    parse_estimated_print_time,
     remove_leading_retract,
     translate_gcode,
     trim_gcode,
@@ -61,10 +63,13 @@ def merge_gcode_files(
         raise ValueError("G-code paths and chunks must have the same length")
 
     final_gcode = []
+    estimates = []
     total = len(gcode_paths)
 
     for index, gcode_path in enumerate(gcode_paths):
-        lines = gcode_path.read_text().splitlines(keepends=True)
+        text = gcode_path.read_text()
+        estimates.append(parse_estimated_print_time(text))
+        lines = text.splitlines(keepends=True)
         lines = trim_gcode(lines, index, total)
         if index > 0:
             lines = remove_leading_retract(lines)
@@ -82,6 +87,20 @@ def merge_gcode_files(
             )
 
         final_gcode.extend(lines)
+
+    if total > 1:
+        final_gcode = [
+            line
+            for line in final_gcode
+            if "estimated printing time (normal mode)" not in line.lower()
+        ]
+        valid_estimates = [estimate for estimate in estimates if estimate is not None]
+        if len(valid_estimates) == total:
+            total_seconds = sum(valid_estimates)
+            final_gcode.insert(
+                0,
+                f"; estimated printing time (normal mode) = {format_print_time(total_seconds)}\n",
+            )
 
     output_path.write_text("".join(final_gcode))
     return output_path

@@ -18,6 +18,7 @@ SETUP_COLOR = PENTOS_ORANGE
 @dataclass(frozen=True)
 class PreviewControls:
     status: viser.GuiTextHandle
+    estimated_time: viser.GuiTextHandle
     output_path: viser.GuiTextHandle
     show_travel: viser.GuiCheckboxHandle
     line_width: viser.GuiNumberHandle[float]
@@ -42,6 +43,11 @@ class PreviewView:
             "Saved G-code",
             disabled=True,
         )
+        estimated_time = self.client.gui.add_text(
+            "Estimated time",
+            "",
+            disabled=True,
+        )
         output_path = self.client.gui.add_text(
             "Output G-code",
             "" if gcode_path is None else gcode_path.name,
@@ -61,6 +67,7 @@ class PreviewView:
         back_button = self.client.gui.add_button("Back to Setup")
         controls = PreviewControls(
             status=status,
+            estimated_time=estimated_time,
             output_path=output_path,
             show_travel=show_travel,
             line_width=line_width,
@@ -102,6 +109,9 @@ class PreviewView:
 
     def set_status(self, message: str) -> None:
         self._mounted().status.value = message
+
+    def set_estimated_time(self, estimate: str) -> None:
+        self._mounted().estimated_time.value = estimate
 
     def show_preview(self, preview: GcodePreview) -> None:
         controls = self._mounted()
@@ -154,6 +164,7 @@ class PreviewView:
             controls.show_travel,
             controls.download_button,
             controls.output_path,
+            controls.estimated_time,
             controls.status,
         ):
             handle.remove()

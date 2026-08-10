@@ -2,6 +2,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
+from gcode_tools import format_print_time, parse_estimated_print_time
 from models import AppState, GcodePreview
 from services.gcode_preview import parse_gcode_preview
 
@@ -12,6 +13,8 @@ class PreviewViewPort(Protocol):
     def unmount(self) -> None: ...
 
     def set_status(self, message: str) -> None: ...
+
+    def set_estimated_time(self, estimate: str) -> None: ...
 
     def show_preview(self, preview: GcodePreview) -> None: ...
 
@@ -49,6 +52,9 @@ class PreviewController:
         self.view.show_preview(preview)
         extrusion_count = sum(len(part.extrusion) for part in preview.parts)
         travel_count = sum(len(part.travel) for part in preview.parts)
+        estimate = parse_estimated_print_time(text)
+        if estimate is not None:
+            self.view.set_estimated_time(format_print_time(estimate))
         self.view.set_status(
             f"Preview: {len(preview.parts)} parts, "
             f"{extrusion_count} extrusion, "

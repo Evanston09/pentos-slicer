@@ -5,6 +5,15 @@ from numpy.testing import assert_allclose
 import gcode_tools
 
 
+def test_estimated_print_time_round_trip() -> None:
+    text = "; estimated printing time (normal mode) = 1h 2m 3s\n"
+
+    seconds = gcode_tools.parse_estimated_print_time(text)
+
+    assert seconds == 3723
+    assert gcode_tools.format_print_time(seconds) == "1h 2m 3s"
+
+
 def test_gcode_command_parse() -> None:
     parsed = gcode_tools.GcodeCommand.parse("g1 x1.5 Y-2 E.25 ; move")
 

@@ -4,7 +4,37 @@ import numpy as np
 import pytest
 
 from gcode_tools import GcodeCommand
-from services.multiplanar_gcode import apply_chunk_offsets
+from services.multiplanar_gcode import apply_chunk_offsets, merge_gcode_files
+
+
+def test_merge_sums_chunk_time_estimates(tmp_path) -> None:
+    paths = []
+    for index, estimate in enumerate(("1m 10s", "50s")):
+        path = tmp_path / f"chunk_{index}.gcode"
+        path.write_text(
+            "G90\n"
+            ";LAYER_CHANGE\n"
+            f"G1 X{index + 1} Y2 Z3 F1200\n"
+            ";TYPE:Custom\n"
+            f"; estimated printing time (normal mode) = {estimate}\n"
+        )
+        paths.append(path)
+    chunks = [
+        SimpleNamespace(
+            z_offset=0.0,
+            flat_xy_offset=[0.0, 0.0],
+            a_degrees=0.0,
+            b_degrees=0.0,
+        )
+        for _ in paths
+    ]
+    output = tmp_path / "merged.gcode"
+
+    merge_gcode_files(paths, chunks, output)
+
+    assert output.read_text().startswith(
+        "; estimated printing time (normal mode) = 2m\n"
+    )
 
 
 def test_apply_chunk_offsets_adjusts_flattened_absolute_moves() -> None:

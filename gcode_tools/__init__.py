@@ -1,9 +1,4 @@
-from .commands import (
-    GcodeCommand,
-    is_comment_line,
-    parse_gcode_arg,
-    parse_gcode_args,
-)
+from .commands import GcodeCommand, parse_gcode_arg, parse_gcode_args
 from .moves import (
     GcodeBounds,
     GcodeMove,
@@ -12,6 +7,7 @@ from .moves import (
     translate_gcode,
     xyz_array,
 )
+from .print_time import format_print_time, parse_estimated_print_time
 from .trimming import (
     remove_end,
     remove_leading_retract,
@@ -24,10 +20,11 @@ __all__ = [
     "GcodeCommand",
     "GcodeMove",
     "find_first_last_xyz",
-    "is_comment_line",
+    "format_print_time",
     "iter_gcode_moves",
     "parse_gcode_arg",
     "parse_gcode_args",
+    "parse_estimated_print_time",
     "remove_end",
     "remove_leading_retract",
     "remove_start",
