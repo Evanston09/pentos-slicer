@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import viser
-from machine import BUILD_PLATE_CENTER, BUILD_PLATE_SIZE, BUILD_VOLUME_SIZE
+from models import DEFAULT_MACHINE_CONFIG, MachineConfig
 from viser.theme import TitlebarButton, TitlebarConfig, TitlebarImage
 
 BUILD_PLATE_COLOR = (45, 45, 45)
@@ -46,23 +46,26 @@ def configure_theme(client: viser.ClientHandle) -> None:
     )
 
 
-def add_build_plate_scene(client: viser.ClientHandle) -> None:
+def add_build_plate_scene(
+    client: viser.ClientHandle,
+    config: MachineConfig = DEFAULT_MACHINE_CONFIG,
+) -> None:
+    width, depth, height = config.build_volume_mm
     client.scene.add_grid(
         "/shared/grid",
-        width=BUILD_PLATE_SIZE,
-        height=BUILD_PLATE_SIZE,
+        width=width,
+        height=depth,
         cell_size=5.0,
         section_size=10.0,
-        position=np.asarray(BUILD_PLATE_CENTER),
+        position=np.asarray(config.build_plate_center),
     )
 
-    size = BUILD_PLATE_SIZE
     vertices = np.array(
         [
             [0.0, 0.0, -0.02],
-            [size, 0.0, -0.02],
-            [size, size, -0.02],
-            [0.0, size, -0.02],
+            [width, 0.0, -0.02],
+            [width, depth, -0.02],
+            [0.0, depth, -0.02],
         ],
     )
     faces = np.array([[0, 1, 2], [0, 2, 3]])
@@ -79,17 +82,16 @@ def add_build_plate_scene(client: viser.ClientHandle) -> None:
         "/shared/build_plate/outline",
         points=np.array(
             [
-                [[0.0, 0.0, 0.0], [size, 0.0, 0.0]],
-                [[size, 0.0, 0.0], [size, size, 0.0]],
-                [[size, size, 0.0], [0.0, size, 0.0]],
-                [[0.0, size, 0.0], [0.0, 0.0, 0.0]],
+                [[0.0, 0.0, 0.0], [width, 0.0, 0.0]],
+                [[width, 0.0, 0.0], [width, depth, 0.0]],
+                [[width, depth, 0.0], [0.0, depth, 0.0]],
+                [[0.0, depth, 0.0], [0.0, 0.0, 0.0]],
             ],
         ),
         colors=PENTOS_ORANGE,
         line_width=2.0,
     )
 
-    width, depth, height = BUILD_VOLUME_SIZE
     corners = np.array(
         [
             [0.0, 0.0, 0.0],

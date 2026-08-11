@@ -2,7 +2,7 @@ import numpy as np
 from numpy.testing import assert_allclose
 
 from gcode_tools import iter_gcode_moves
-from machine import MACHINE_OFFSET
+from models import DEFAULT_MACHINE_CONFIG
 from services.nonplanar_gcode import continuous_ab_angles, map_gcode_to_original
 from services.volumetric_deformation import TetrahedralVolume
 
@@ -40,7 +40,7 @@ def test_map_gcode_inverse_maps_and_compensates_extrusion() -> None:
         boundary_faces=np.array([[1, 2, 3], [0, 3, 2], [0, 1, 3], [0, 2, 1]]),
         scalar_values=original[:, 2],
     )
-    offset = np.asarray(MACHINE_OFFSET)
+    offset = np.asarray(DEFAULT_MACHINE_CONFIG.machine_offset)
     start = offset + [0.0, 0.1, 0.1]
     end = offset + [0.4, 0.1, 0.1]
     text = (

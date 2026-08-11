@@ -44,7 +44,7 @@ class PreviewController:
 
         try:
             text = self.state.gcode_path.read_text()
-            preview = parse_gcode_preview(text)
+            preview = parse_gcode_preview(text, self.state.machine_config)
         except Exception as exc:
             self.view.set_status(f"Failed to preview G-code: {exc}")
             return

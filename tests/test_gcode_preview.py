@@ -1,17 +1,18 @@
 import numpy as np
 from numpy.testing import assert_allclose
 
-from machine import MACHINE_OFFSET, ROTATION_CENTER, rotation_matrix
+from machine import rotation_matrix
+from models import DEFAULT_MACHINE_CONFIG
 from services.gcode_preview import parse_gcode_preview
 
 
 def test_preview_uses_each_endpoint_ab_pose() -> None:
     start = np.array([45.0, 45.0, 5.0])
     end = np.array([46.0, 45.0, 5.0])
-    center = np.asarray(ROTATION_CENTER)
-    machine_start = np.asarray(MACHINE_OFFSET) + start
+    center = np.asarray(DEFAULT_MACHINE_CONFIG.rotation_center_local_mm)
+    machine_start = np.asarray(DEFAULT_MACHINE_CONFIG.machine_offset) + start
     machine_end = (
-        np.asarray(MACHINE_OFFSET)
+        np.asarray(DEFAULT_MACHINE_CONFIG.machine_offset)
         + center
         + rotation_matrix(10.0, 0.0) @ (end - center)
     )

@@ -130,7 +130,7 @@ def test_transformed_model_does_not_mutate_stored_mesh() -> None:
     original_vertices = base.vertices.copy()
     state = AppState(
         current_model=(base, "box"),
-        model_xy_position=[20.0, 30.0],
+        model_xy_position=(20.0, 30.0),
         model_z_degrees=90.0,
     )
 

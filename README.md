@@ -79,6 +79,27 @@ integer to change that limit.
 
 Sample models are available in `samples/`.
 
+## Machine Configuration
+
+The **Machine** panel imports and exports versioned `.json` machine profiles.
+Profiles apply only to the current browser session and contain machine geometry;
+the PrusaSlicer profile remains in `pentos_config.ini`.
+
+```json
+{
+  "format": "pentos-machine",
+  "version": 1,
+  "name": "My Pentos",
+  "build_volume_mm": [90, 90, 90],
+  "machine_plate_center_mm": [113, 52, 0],
+  "rotation_center_machine_mm": [112, 51, 2]
+}
+```
+
+`machine_plate_center_mm` and `rotation_center_machine_mm` are in machine
+coordinates. Pentos derives the slicer-local plate center, machine offset, and
+local rotation center from these values.
+
 ## Project Layout
 
 - `main.py` starts the Viser server and mounts the application controller.

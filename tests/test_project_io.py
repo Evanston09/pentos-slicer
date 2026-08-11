@@ -13,7 +13,7 @@ from services.project_io import load_scene, save_scene
 def test_scene_round_trip_preserves_nonplanar_project() -> None:
     state = AppState(
         current_model=(trimesh.creation.box(), "box"),
-        model_xy_position=[12.0, 34.0],
+        model_xy_position=(12.0, 34.0),
         model_z_degrees=15.0,
         plane_snapshots=[
             PlaneSnapshot(
@@ -46,7 +46,7 @@ def test_scene_round_trip_preserves_nonplanar_project() -> None:
     loaded = load_scene(content)
     assert loaded.current_model is not None
     assert loaded.current_model[1] == "box"
-    assert loaded.model_xy_position == [12.0, 34.0]
+    assert loaded.model_xy_position == (12.0, 34.0)
     assert loaded.model_z_degrees == 15.0
     assert loaded.debug_mode
     assert loaded.slicing_mode == "nonplanar"

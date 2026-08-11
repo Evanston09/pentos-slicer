@@ -3,7 +3,6 @@ from typing import Any, Protocol
 
 from controllers.preview_controller import PreviewController
 from controllers.setup_controller import SetupController
-from machine import BUILD_PLATE_CENTER
 from models import AppState
 from services.session_workspace import SessionWorkspace
 from services.slicing import Slicer
@@ -23,10 +22,11 @@ class AppController:
         workspace: SessionWorkspace,
         slicing_slots: BoundedSemaphore,
     ) -> None:
-        self.state = AppState(model_xy_position=BUILD_PLATE_CENTER[:2])
+        self.state = AppState()
         self.slicer = Slicer(
             out_dir=workspace.path / "output",
             temp_dir=workspace.path / "temp",
+            machine_config=self.state.machine_config,
         )
         self.setup_view = SetupView(client)
         self.preview_view = PreviewView(client)

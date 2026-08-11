@@ -25,7 +25,7 @@ def load_scene(content: bytes) -> AppState:
             mesh,
             source_name_from_filename(manifest["original_model_name"]),
         ),
-        model_xy_position=list(manifest["model_xy_position"]),
+        model_xy_position=tuple(manifest["model_xy_position"]),
         model_z_degrees=manifest["model_z_degrees"],
         plane_snapshots=[
             PlaneSnapshot.from_dict(snapshot, plane_id)

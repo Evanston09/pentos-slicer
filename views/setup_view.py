@@ -10,11 +10,12 @@ import viser
 from models import (
     AppState,
     GuideSurfaceSnapshot,
+    MachineConfig,
     PlaneSnapshot,
 )
 from views.guide_surface_editor_view import GuideSurfaceEditorView
 from views.plane_editor_view import PlaneEditorView
-from views.theming import OVERHANG_RED, PENTOS_BLUE
+from views.theming import OVERHANG_RED, PENTOS_BLUE, add_build_plate_scene
 
 if TYPE_CHECKING:
     from controllers.setup_controller import SetupController
@@ -25,6 +26,8 @@ MODEL_GIZMO_SCALE = 18.0
 
 @dataclass(frozen=True)
 class SetupControls:
+    machine_folder: viser.GuiFolderHandle
+    machine_name: viser.GuiTextHandle
     upload: viser.GuiUploadButtonHandle
     status: viser.GuiTextHandle
     model_folder: viser.GuiFolderHandle
@@ -85,6 +88,24 @@ class SetupView:
     def mount(self, state: AppState) -> None:
         self.plane_editor.set_visible(True)
         self.guide_surface_editor.set_visible(False)
+        machine_folder = self.client.gui.add_folder("Machine")
+        with machine_folder:
+            machine_name = self.client.gui.add_text(
+                "Active Machine",
+                state.machine_config.name,
+                disabled=True,
+            )
+            machine_upload = self.client.gui.add_upload_button(
+                "Import Machine Config",
+                mime_type="application/json,.json",
+                icon=viser.Icon.UPLOAD,
+            )
+            machine_export = self.client.gui.add_button(
+                "Export Machine Config",
+                icon=viser.Icon.DOWNLOAD,
+            )
+            machine_reset = self.client.gui.add_button("Reset Machine Config")
+
         upload = self.client.gui.add_upload_button(
             "Upload Model/Scene",
             mime_type=".stl,.3mf,.obj,.ply,.pentos",
@@ -180,6 +201,8 @@ class SetupView:
             icon=viser.Icon.CLOUD_COMPUTING,
         )
         controls = SetupControls(
+            machine_folder=machine_folder,
+            machine_name=machine_name,
             upload=upload,
             status=status,
             model_folder=model_folder,
@@ -200,6 +223,21 @@ class SetupView:
             slice_button=slice_button,
         )
         self.controls = controls
+
+        @machine_upload.on_upload
+        def _(event) -> None:
+            uploaded = event.target.value
+            self.controller.import_machine_config(uploaded.content)
+
+        @machine_export.on_click
+        def _(event) -> None:
+            filename, content = self.controller.export_machine_config()
+            assert event.client is not None
+            event.client.send_file_download(filename, content, save_immediately=True)
+
+        @machine_reset.on_click
+        def _(_) -> None:
+            self.controller.reset_machine_config()
 
         @controls.upload.on_upload
         def _(event) -> None:
@@ -292,6 +330,7 @@ class SetupView:
             controls.slicing_mode,
             controls.status,
             controls.upload,
+            controls.machine_folder,
         ):
             handle.remove()
 
@@ -299,6 +338,10 @@ class SetupView:
 
     def set_status(self, message: str) -> None:
         self._mounted().status.value = message
+
+    def show_machine_config(self, config: MachineConfig) -> None:
+        self._mounted().machine_name.value = config.name
+        add_build_plate_scene(self.client, config)
 
     def set_slice_enabled(self, enabled: bool) -> None:
         self._mounted().slice_button.disabled = not enabled
@@ -400,7 +443,7 @@ class SetupView:
 
     def update_model_placement(
         self,
-        xy_position: list[float],
+        xy_position: tuple[float, float],
         z_degrees: float,
         position: np.ndarray,
         wxyz: np.ndarray,
@@ -495,7 +538,7 @@ class SetupView:
 
     def _sync_model_controls(
         self,
-        xy_position: list[float],
+        xy_position: tuple[float, float],
         z_degrees: float,
     ) -> None:
         controls = self._mounted()

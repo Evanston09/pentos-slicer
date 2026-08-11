@@ -1,8 +1,13 @@
 import numpy as np
 
 from gcode_tools import GcodeCommand, iter_gcode_moves
-from machine import MACHINE_OFFSET, ROTATION_CENTER, rotation_matrix
-from models import GcodePreview, GcodePreviewPart
+from machine import rotation_matrix
+from models import (
+    DEFAULT_MACHINE_CONFIG,
+    GcodePreview,
+    GcodePreviewPart,
+    MachineConfig,
+)
 
 SETUP_COLOR = (255, 130, 0)
 PART_COLORS = [
@@ -19,17 +24,22 @@ def transform_preview_point(
     point: np.ndarray,
     a_degrees: float,
     b_degrees: float,
+    machine_config: MachineConfig = DEFAULT_MACHINE_CONFIG,
 ) -> np.ndarray:
-    local_point = point - MACHINE_OFFSET
+    local_point = point - machine_config.machine_offset
     if np.isclose(a_degrees, 0.0) and np.isclose(b_degrees, 0.0):
         return local_point
 
     # Merged G-code is in the rotated machine pose; preview in object space.
     rotation = rotation_matrix(a_degrees, b_degrees)
-    return ROTATION_CENTER + rotation.T @ (local_point - ROTATION_CENTER)
+    center = np.asarray(machine_config.rotation_center_local_mm)
+    return center + rotation.T @ (local_point - center)
 
 
-def parse_gcode_preview(text: str) -> GcodePreview:
+def parse_gcode_preview(
+    text: str,
+    machine_config: MachineConfig = DEFAULT_MACHINE_CONFIG,
+) -> GcodePreview:
     has_seen_layer = False
     in_transition = False
     setup_segments: list[list[np.ndarray]] = []
@@ -71,8 +81,10 @@ def parse_gcode_preview(text: str) -> GcodePreview:
             continue
 
         if move.has_xyz and move.start_xyz is not None and move.end_xyz is not None:
-            start = transform_preview_point(move.start_xyz, *move.start_ab)
-            end = transform_preview_point(move.end_xyz, *move.end_ab)
+            start = transform_preview_point(
+                move.start_xyz, *move.start_ab, machine_config
+            )
+            end = transform_preview_point(move.end_xyz, *move.end_ab, machine_config)
             segment = [start, end]
             if not in_transition:
                 if not has_seen_layer:

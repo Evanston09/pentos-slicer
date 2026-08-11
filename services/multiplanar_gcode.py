@@ -11,7 +11,7 @@ from gcode_tools import (
     translate_gcode,
     trim_gcode,
 )
-from machine import MACHINE_OFFSET
+from models import DEFAULT_MACHINE_CONFIG
 
 
 class MultiplanarChunk(Protocol):
@@ -58,6 +58,7 @@ def merge_gcode_files(
     gcode_paths: Sequence[Path],
     chunks: Sequence[MultiplanarChunk],
     output_path: Path,
+    machine_offset: Sequence[float] = DEFAULT_MACHINE_CONFIG.machine_offset,
 ) -> Path:
     if len(gcode_paths) != len(chunks):
         raise ValueError("G-code paths and chunks must have the same length")
@@ -73,7 +74,7 @@ def merge_gcode_files(
         lines = trim_gcode(lines, index, total)
         if index > 0:
             lines = remove_leading_retract(lines)
-        lines = translate_gcode(lines, MACHINE_OFFSET)
+        lines = translate_gcode(lines, machine_offset)
 
         if index > 0:
             lines = apply_chunk_offsets(lines, chunks[index])
@@ -110,6 +111,7 @@ def generate_debug_transition_check(
     gcode_paths: Sequence[Path],
     chunks: Sequence[MultiplanarChunk],
     output_path: Path,
+    machine_offset: Sequence[float] = DEFAULT_MACHINE_CONFIG.machine_offset,
 ) -> Path:
     if len(gcode_paths) != len(chunks):
         raise ValueError("G-code paths and chunks must have the same length")
@@ -122,7 +124,7 @@ def generate_debug_transition_check(
         lines = trim_gcode(lines, index, total)
         if index > 0:
             lines = remove_leading_retract(lines)
-        lines = translate_gcode(lines, MACHINE_OFFSET)
+        lines = translate_gcode(lines, machine_offset)
         if index > 0:
             lines = apply_chunk_offsets(lines, chunks[index])
         bounds.append(find_first_last_xyz(lines))

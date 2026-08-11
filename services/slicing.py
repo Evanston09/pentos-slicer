@@ -6,7 +6,8 @@ from typing import Protocol
 import numpy as np
 import trimesh
 
-from machine import BUILD_PLATE_CENTER, ROTATION_CENTER, rotation_matrix
+from machine import rotation_matrix
+from models import DEFAULT_MACHINE_CONFIG, MachineConfig
 from services.multiplanar_gcode import (
     generate_debug_transition_check,
     merge_gcode_files,
@@ -83,11 +84,11 @@ class Slicer:
         self,
         out_dir: Path,
         temp_dir: Path,
-        rotation_center: np.ndarray | tuple[float, float, float] = ROTATION_CENTER,
+        machine_config: MachineConfig = DEFAULT_MACHINE_CONFIG,
     ) -> None:
         self.out_dir = out_dir
         self.temp_dir = temp_dir
-        self.rotation_center = np.array(rotation_center)
+        self.machine_config = machine_config
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -103,7 +104,12 @@ class Slicer:
 
         gcode_paths = self.run_prusa_slicer(chunks)
         output_path = self.out_dir / f"{source_name}.gcode"
-        return merge_gcode_files(gcode_paths, chunks, output_path)
+        return merge_gcode_files(
+            gcode_paths,
+            chunks,
+            output_path,
+            self.machine_config.machine_offset,
+        )
 
     def debug_transition_check(
         self,
@@ -121,6 +127,7 @@ class Slicer:
             gcode_paths,
             chunks,
             output_path,
+            self.machine_config.machine_offset,
         )
 
     def run_prusa_slicer(
@@ -231,7 +238,7 @@ class Slicer:
             transform[:3, :3] = rotation_matrix(a_degrees, b_degrees)
             transform = trimesh.transformations.transform_around(
                 transform,
-                self.rotation_center,
+                np.asarray(self.machine_config.rotation_center_local_mm),
             )
             mesh.apply_transform(transform)
 
@@ -241,8 +248,8 @@ class Slicer:
         if print_up_normal is not None:
             flat_center = mesh.bounds.mean(axis=0)[:2]
             flat_xy_offset = [
-                BUILD_PLATE_CENTER[0] - flat_center[0],
-                BUILD_PLATE_CENTER[1] - flat_center[1],
+                self.machine_config.build_plate_center[0] - flat_center[0],
+                self.machine_config.build_plate_center[1] - flat_center[1],
             ]
             mesh.apply_translation([flat_xy_offset[0], flat_xy_offset[1], 0.0])
 

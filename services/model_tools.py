@@ -5,8 +5,7 @@ import numpy as np
 import trimesh
 from trimesh import transformations as tf
 
-from machine import BUILD_PLATE_CENTER, BUILD_VOLUME_SIZE
-from models import AppState
+from models import DEFAULT_MACHINE_CONFIG, AppState
 
 SUPPORTED_UPLOAD_EXTENSIONS = frozenset({".stl", ".3mf", ".obj", ".ply", ".pentos"})
 DEFAULT_MAX_UPLOAD_MB = 50
@@ -71,10 +70,11 @@ def load_model(path: Path) -> trimesh.Trimesh:
 
     lower, upper = mesh.bounds
     mesh_center_xy = (lower[:2] + upper[:2]) / 2.0
+    plate_center = DEFAULT_MACHINE_CONFIG.build_plate_center
     mesh.apply_translation(
         [
-            BUILD_PLATE_CENTER[0] - mesh_center_xy[0],
-            BUILD_PLATE_CENTER[1] - mesh_center_xy[1],
+            plate_center[0] - mesh_center_xy[0],
+            plate_center[1] - mesh_center_xy[1],
             -lower[2],
         ]
     )
@@ -147,9 +147,12 @@ def transformed_model(state: AppState) -> tuple[trimesh.Trimesh, str] | None:
     return mesh, source_name
 
 
-def model_within_build_volume(mesh: trimesh.Trimesh) -> bool:
+def model_within_build_volume(
+    mesh: trimesh.Trimesh,
+    build_volume: tuple[float, float, float] = DEFAULT_MACHINE_CONFIG.build_volume_mm,
+) -> bool:
     lower, upper = mesh.bounds
-    volume_upper = np.asarray(BUILD_VOLUME_SIZE)
+    volume_upper = np.asarray(build_volume)
     lower_inside = np.logical_or(lower >= 0.0, np.isclose(lower, 0.0))
     upper_inside = np.logical_or(
         upper <= volume_upper,

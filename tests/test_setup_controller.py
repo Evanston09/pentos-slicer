@@ -9,7 +9,8 @@ import trimesh
 
 import controllers.setup_controller as setup_controller_module
 from controllers.setup_controller import SetupController
-from models import AppState, GuideSurfaceSnapshot
+from models import AppState, GuideSurfaceSnapshot, MachineConfig
+from services.machine_config_io import save_machine_config
 from services.project_io import save_scene
 
 
@@ -26,6 +27,7 @@ class FakeSetupView:
         self.slice_enabled = []
         self.slicing_mode = "multiplanar"
         self.guides = []
+        self.machine_config = None
 
     def mount(self, state: AppState) -> None:
         self.mounted = True
@@ -35,6 +37,9 @@ class FakeSetupView:
 
     def set_status(self, message: str) -> None:
         self.statuses.append(message)
+
+    def show_machine_config(self, config) -> None:
+        self.machine_config = config
 
     def set_slice_enabled(self, enabled: bool) -> None:
         self.slice_enabled.append(enabled)
@@ -140,6 +145,24 @@ def make_controller(
     return controller, view, slicer, navigations
 
 
+def test_machine_config_upload_applies_to_session() -> None:
+    controller, view, slicer, _ = make_controller()
+    config = MachineConfig(
+        name="Large Pentos",
+        build_volume_mm=(120.0, 100.0, 150.0),
+        machine_plate_center_mm=(130.0, 70.0, 0.0),
+        rotation_center_machine_mm=(129.0, 69.0, 3.0),
+    )
+
+    controller.import_machine_config(save_machine_config(config))
+
+    assert controller.state.machine_config == config
+    assert controller.state.model_xy_position == (60.0, 50.0)
+    assert slicer.machine_config == config
+    assert view.machine_config == config
+    assert view.statuses[-1] == "Loaded machine Large Pentos"
+
+
 def test_upload_and_placement_update_state(monkeypatch, tmp_path) -> None:
     mesh = trimesh.creation.box()
 
@@ -158,7 +181,7 @@ def test_upload_and_placement_update_state(monkeypatch, tmp_path) -> None:
     controller.set_model_placement([12.0, 34.0], 45.0)
 
     assert controller.state.current_model == (mesh, "uploaded")
-    assert controller.state.model_xy_position == [12.0, 34.0]
+    assert controller.state.model_xy_position == (12.0, 34.0)
     assert controller.state.model_z_degrees == 45.0
     assert view.mesh is mesh
     assert view.statuses[-1] == "Loaded uploaded"

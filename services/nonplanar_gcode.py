@@ -3,7 +3,8 @@ import math
 import numpy as np
 
 from gcode_tools import GcodeCommand, iter_gcode_moves, parse_gcode_arg
-from machine import MACHINE_OFFSET, ROTATION_CENTER, rotation_matrix
+from machine import rotation_matrix
+from models import DEFAULT_MACHINE_CONFIG, MachineConfig
 from services.slicing import Slicer
 from services.volumetric_deformation import TetrahedralVolume
 
@@ -32,6 +33,7 @@ def map_gcode_to_original(
     text: str,
     volume: TetrahedralVolume,
     max_segment_length: float = 0.5,
+    machine_config: MachineConfig = DEFAULT_MACHINE_CONFIG,
 ) -> str:
     """Subdivide and inverse-map printable G-code moves through a tetrahedral volume."""
     if max_segment_length <= 0.0:
@@ -80,7 +82,7 @@ def map_gcode_to_original(
         stripped = line.rstrip("\r\n")
         ending = line[len(stripped) :]
         try:
-            local_points = points - MACHINE_OFFSET
+            local_points = points - machine_config.machine_offset
             original_points = volume.map_to_original(local_points)
             extrusion_multipliers = (
                 np.minimum(
@@ -95,8 +97,8 @@ def map_gcode_to_original(
             for normal in normals:
                 previous_ab = continuous_ab_angles(normal, previous_ab)
                 angles.append(previous_ab)
-            center = np.asarray(ROTATION_CENTER)
-            offset = np.asarray(MACHINE_OFFSET)
+            center = np.asarray(machine_config.rotation_center_local_mm)
+            offset = np.asarray(machine_config.machine_offset)
             mapped = np.asarray(
                 [
                     offset

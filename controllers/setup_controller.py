@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from threading import BoundedSemaphore
 from typing import Protocol
 
@@ -6,13 +6,16 @@ import numpy as np
 import trimesh
 
 from controllers.nonplanar_controller import NonplanarController, NonplanarViewPort
-from machine import BUILD_PLATE_CENTER
-from models import AppState, PlaneSnapshot
+from models import DEFAULT_MACHINE_CONFIG, AppState, MachineConfig, PlaneSnapshot
 from services.auto_planes import (
     AutoPlaneConfig,
     AutoPlaneSelector,
     overhang_preview_mesh,
     quaternion_from_z_to,
+)
+from services.machine_config_io import (
+    load_machine_config,
+    save_machine_config,
 )
 from services.model_tools import (
     load_uploaded_model,
@@ -35,6 +38,8 @@ class SetupViewPort(NonplanarViewPort, Protocol):
     def unmount(self) -> None: ...
 
     def set_status(self, message: str) -> None: ...
+
+    def show_machine_config(self, config: MachineConfig) -> None: ...
 
     def set_slice_enabled(self, enabled: bool) -> None: ...
 
@@ -62,7 +67,7 @@ class SetupViewPort(NonplanarViewPort, Protocol):
 
     def update_model_placement(
         self,
-        xy_position: list[float],
+        xy_position: tuple[float, float],
         z_degrees: float,
         position: np.ndarray,
         wxyz: np.ndarray,
@@ -128,7 +133,9 @@ class SetupController:
 
             mesh, source_name = load_uploaded_model(name, content, self.upload_dir)
             self.state.current_model = (mesh, source_name)
-            self.state.model_xy_position = BUILD_PLATE_CENTER[:2]
+            self.state.model_xy_position = self.state.machine_config.build_plate_center[
+                :2
+            ]
             self.state.model_z_degrees = 0.0
             self.state.gcode_path = None
             self._show_current_model()
@@ -137,9 +144,27 @@ class SetupController:
             self.view.set_status(f"Failed to load {name}: {exc}")
             print(f"Failed to load {name}: {exc}")
 
+    def import_machine_config(self, content: bytes) -> None:
+        try:
+            self._apply_machine_config(load_machine_config(content))
+            self.view.set_status(f"Loaded machine {self.state.machine_config.name}")
+        except Exception as exc:
+            self.view.set_status(f"Failed to load machine configuration: {exc}")
+
+    def export_machine_config(self) -> tuple[str, bytes]:
+        self.view.set_status(f"Exported machine {self.state.machine_config.name}")
+        return (
+            "pentos_machine.pentos-machine.json",
+            save_machine_config(self.state.machine_config),
+        )
+
+    def reset_machine_config(self) -> None:
+        self._apply_machine_config(DEFAULT_MACHINE_CONFIG)
+        self.view.set_status("Reset machine configuration")
+
     def set_model_placement(
         self,
-        xy_position: list[float] | None = None,
+        xy_position: Sequence[float] | None = None,
         z_degrees: float | None = None,
     ) -> None:
         if self.state.current_model is None:
@@ -147,7 +172,7 @@ class SetupController:
 
         mesh, _ = self.state.current_model
         if xy_position is not None:
-            self.state.model_xy_position = [xy_position[0], xy_position[1]]
+            self.state.model_xy_position = (xy_position[0], xy_position[1])
         if z_degrees is not None:
             self.state.model_z_degrees = z_degrees
 
@@ -161,7 +186,10 @@ class SetupController:
         self.refresh_overhang_preview()
 
     def reset_model_placement(self) -> None:
-        self.set_model_placement(BUILD_PLATE_CENTER[:2], 0.0)
+        self.set_model_placement(
+            self.state.machine_config.build_plate_center[:2],
+            0.0,
+        )
 
     def add_plane(
         self,
@@ -326,6 +354,7 @@ class SetupController:
                             map_gcode_to_original(
                                 planar_path.read_text(),
                                 volume,
+                                machine_config=self.state.machine_config,
                             )
                         )
                     else:
@@ -393,6 +422,16 @@ class SetupController:
             self._show_current_model()
             self.view.set_status(f"Loaded scene {self.state.current_model[1]}")
 
+    def _apply_machine_config(self, config: MachineConfig) -> None:
+        self.state.machine_config = config
+        self.state.model_xy_position = config.build_plate_center[:2]
+        self.state.gcode_path = None
+        self.slicer.machine_config = config
+        self.view.show_machine_config(config)
+        # Recenter the loaded model and check it against the new build volume.
+        if self.state.current_model is not None:
+            self._show_current_model()
+
     def _show_current_model(self) -> None:
         if self.state.current_model is None:
             return
@@ -415,7 +454,12 @@ class SetupController:
     def _refresh_model_bounds(self) -> None:
         model = transformed_model(self.state)
         if model is not None:
-            self.view.set_model_out_of_bounds(not model_within_build_volume(model[0]))
+            self.view.set_model_out_of_bounds(
+                not model_within_build_volume(
+                    model[0],
+                    self.state.machine_config.build_volume_mm,
+                )
+            )
 
     def _allocate_plane_id(self) -> int:
         plane_id = self.next_plane_id
