@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from gcode_tools import GcodeCommand
+from models import DEFAULT_MACHINE_CONFIG
 from services.multiplanar_gcode import apply_chunk_offsets, merge_gcode_files
 
 
@@ -30,7 +31,7 @@ def test_merge_sums_chunk_time_estimates(tmp_path) -> None:
     ]
     output = tmp_path / "merged.gcode"
 
-    merge_gcode_files(paths, chunks, output)
+    merge_gcode_files(paths, chunks, output, DEFAULT_MACHINE_CONFIG.machine_offset)
 
     assert output.read_text().startswith(
         "; estimated printing time (normal mode) = 2m\n"

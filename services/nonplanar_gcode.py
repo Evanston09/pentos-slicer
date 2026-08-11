@@ -4,7 +4,7 @@ import numpy as np
 
 from gcode_tools import GcodeCommand, iter_gcode_moves, parse_gcode_arg
 from machine import rotation_matrix
-from models import DEFAULT_MACHINE_CONFIG, MachineConfig
+from models import MachineConfig
 from services.slicing import Slicer
 from services.volumetric_deformation import TetrahedralVolume
 
@@ -32,8 +32,8 @@ def continuous_ab_angles(
 def map_gcode_to_original(
     text: str,
     volume: TetrahedralVolume,
+    machine_config: MachineConfig,
     max_segment_length: float = 0.5,
-    machine_config: MachineConfig = DEFAULT_MACHINE_CONFIG,
 ) -> str:
     """Subdivide and inverse-map printable G-code moves through a tetrahedral volume."""
     if max_segment_length <= 0.0:

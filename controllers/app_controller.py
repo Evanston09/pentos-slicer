@@ -3,10 +3,13 @@ from typing import Any, Protocol
 
 from controllers.preview_controller import PreviewController
 from controllers.setup_controller import SetupController
-from models import AppState
+from models import AppState, MachineConfig
+from services.machine_config_io import save_machine_config
 from services.session_workspace import SessionWorkspace
 from services.slicing import Slicer
 from views import PreviewView, SetupView
+
+MACHINE_CONFIG_STORAGE_KEY = "pentos-machine-config"
 
 
 class SceneController(Protocol):
@@ -21,8 +24,12 @@ class AppController:
         client: Any,
         workspace: SessionWorkspace,
         slicing_slots: BoundedSemaphore,
+        machine_config: MachineConfig,
     ) -> None:
-        self.state = AppState()
+        self.state = AppState(
+            machine_config=machine_config,
+            model_xy_position=machine_config.build_plate_center[:2],
+        )
         self.slicer = Slicer(
             out_dir=workspace.path / "output",
             temp_dir=workspace.path / "temp",
@@ -37,6 +44,10 @@ class AppController:
             self.show_preview,
             workspace,
             slicing_slots,
+            lambda config: client.local_storage.set_item(
+                MACHINE_CONFIG_STORAGE_KEY,
+                save_machine_config(config).decode(),
+            ),
         )
         self.preview_controller = PreviewController(
             self.state,

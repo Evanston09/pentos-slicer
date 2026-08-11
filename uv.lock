@@ -909,7 +909,7 @@ requires-dist = [
     { name = "tetgen", specifier = ">=0.8.4" },
     { name = "triangle", specifier = ">=20250106" },
     { name = "trimesh", extras = ["recommend"], specifier = ">=4.12.2" },
-    { name = "viser", specifier = ">=1.0.30" },
+    { name = "viser", git = "https://github.com/Evanston09/viser.git?rev=local-storage" },
 ]
 
 [package.metadata.requires-dev]
@@ -1046,7 +1046,7 @@ wheels = [
 [[package]]
 name = "viser"
 version = "1.0.30"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/Evanston09/viser.git?rev=local-storage#7f15e8696d5b5538cd174356729042d89cc12465" }
 dependencies = [
     { name = "imageio" },
     { name = "msgspec" },
@@ -1058,10 +1058,6 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websockets" },
     { name = "zstandard" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/83/9a/85f9a82eac4e067fb1bc34cf4f7865b0d914a3ce91f5b0da47dcef549930/viser-1.0.30.tar.gz", hash = "sha256:6a849a9ef141c97d4ac7bd7d970b81265e6d0130ee8ef1c2e18c0b46aa6b6283", size = 4924612, upload-time = "2026-06-03T16:02:38.552Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/4a/c9/9a4ca25b505303d5557c98786ac0bf7081c76a7262e1b6c87b899bccc7b8/viser-1.0.30-py3-none-any.whl", hash = "sha256:43089f50acdd45c19b23101c9a2cf8edcc52d052bf7f53ed0b2b6a932c71b5d1", size = 5027789, upload-time = "2026-06-03T16:02:40.331Z" },
 ]
 
 [[package]]

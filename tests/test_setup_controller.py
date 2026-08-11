@@ -129,6 +129,7 @@ def make_controller(
     workspace_path: Path = Path("."),
     slicer=None,
     slicing_slots=None,
+    persist_machine_config=lambda config: None,
 ):
     view = FakeSetupView()
     slicer = FakeSlicer() if slicer is None else slicer
@@ -141,12 +142,16 @@ def make_controller(
         lambda: navigations.append("preview"),
         FakeWorkspace(workspace_path),
         slicing_slots,
+        persist_machine_config,
     )
     return controller, view, slicer, navigations
 
 
 def test_machine_config_upload_applies_to_session() -> None:
-    controller, view, slicer, _ = make_controller()
+    persisted = []
+    controller, view, slicer, _ = make_controller(
+        persist_machine_config=persisted.append
+    )
     config = MachineConfig(
         name="Large Pentos",
         build_volume_mm=(120.0, 100.0, 150.0),
@@ -160,6 +165,7 @@ def test_machine_config_upload_applies_to_session() -> None:
     assert controller.state.model_xy_position == (60.0, 50.0)
     assert slicer.machine_config == config
     assert view.machine_config == config
+    assert persisted == [config]
     assert view.statuses[-1] == "Loaded machine Large Pentos"
 
 

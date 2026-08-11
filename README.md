@@ -82,8 +82,8 @@ Sample models are available in `samples/`.
 ## Machine Configuration
 
 The **Machine** panel imports and exports versioned `.json` machine profiles.
-Profiles apply only to the current browser session and contain machine geometry;
-the PrusaSlicer profile remains in `pentos_config.ini`.
+The active profile is saved in the browser and restored on future visits. Profiles
+contain machine geometry; the PrusaSlicer profile remains in `pentos_config.ini`.
 
 ```json
 {

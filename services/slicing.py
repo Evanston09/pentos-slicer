@@ -7,7 +7,7 @@ import numpy as np
 import trimesh
 
 from machine import rotation_matrix
-from models import DEFAULT_MACHINE_CONFIG, MachineConfig
+from models import MachineConfig
 from services.multiplanar_gcode import (
     generate_debug_transition_check,
     merge_gcode_files,
@@ -84,7 +84,7 @@ class Slicer:
         self,
         out_dir: Path,
         temp_dir: Path,
-        machine_config: MachineConfig = DEFAULT_MACHINE_CONFIG,
+        machine_config: MachineConfig,
     ) -> None:
         self.out_dir = out_dir
         self.temp_dir = temp_dir

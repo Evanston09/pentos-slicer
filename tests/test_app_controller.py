@@ -1,6 +1,7 @@
 from threading import BoundedSemaphore
 
 from controllers.app_controller import AppController
+from models import DEFAULT_MACHINE_CONFIG
 from services.session_workspace import SessionWorkspace
 
 
@@ -66,7 +67,9 @@ def test_closed_app_does_not_mount_another_screen() -> None:
 
 def test_app_uses_workspace_for_all_runtime_files() -> None:
     workspace = SessionWorkspace(1)
-    app = AppController(object(), workspace, BoundedSemaphore(2))
+    app = AppController(
+        object(), workspace, BoundedSemaphore(2), DEFAULT_MACHINE_CONFIG
+    )
 
     assert app.setup_controller.upload_dir == workspace.path / "uploads"
     assert app.slicer.temp_dir == workspace.path / "temp"

@@ -2,12 +2,7 @@ import numpy as np
 
 from gcode_tools import GcodeCommand, iter_gcode_moves
 from machine import rotation_matrix
-from models import (
-    DEFAULT_MACHINE_CONFIG,
-    GcodePreview,
-    GcodePreviewPart,
-    MachineConfig,
-)
+from models import GcodePreview, GcodePreviewPart, MachineConfig
 
 SETUP_COLOR = (255, 130, 0)
 PART_COLORS = [
@@ -24,7 +19,7 @@ def transform_preview_point(
     point: np.ndarray,
     a_degrees: float,
     b_degrees: float,
-    machine_config: MachineConfig = DEFAULT_MACHINE_CONFIG,
+    machine_config: MachineConfig,
 ) -> np.ndarray:
     local_point = point - machine_config.machine_offset
     if np.isclose(a_degrees, 0.0) and np.isclose(b_degrees, 0.0):
@@ -38,7 +33,7 @@ def transform_preview_point(
 
 def parse_gcode_preview(
     text: str,
-    machine_config: MachineConfig = DEFAULT_MACHINE_CONFIG,
+    machine_config: MachineConfig,
 ) -> GcodePreview:
     has_seen_layer = False
     in_transition = False

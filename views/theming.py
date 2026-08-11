@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import viser
-from models import DEFAULT_MACHINE_CONFIG, MachineConfig
+from models import MachineConfig
 from viser.theme import TitlebarButton, TitlebarConfig, TitlebarImage
 
 BUILD_PLATE_COLOR = (45, 45, 45)
@@ -48,7 +48,7 @@ def configure_theme(client: viser.ClientHandle) -> None:
 
 def add_build_plate_scene(
     client: viser.ClientHandle,
-    config: MachineConfig = DEFAULT_MACHINE_CONFIG,
+    config: MachineConfig,
 ) -> None:
     width, depth, height = config.build_volume_mm
     client.scene.add_grid(

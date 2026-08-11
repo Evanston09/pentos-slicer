@@ -98,6 +98,7 @@ class SetupController:
         show_preview: Callable[[], None],
         workspace: SessionWorkspace,
         slicing_slots: BoundedSemaphore,
+        persist_machine_config: Callable[[MachineConfig], None],
     ) -> None:
         self.state = state
         self.slicer = slicer
@@ -106,6 +107,7 @@ class SetupController:
         self.workspace = workspace
         self.upload_dir = workspace.path / "uploads"
         self.slicing_slots = slicing_slots
+        self.persist_machine_config = persist_machine_config
         self.overhang_threshold_degrees = AutoPlaneConfig().overhang_threshold_degrees
         self.next_plane_id = (
             max((plane.plane_id for plane in state.plane_snapshots), default=-1) + 1
@@ -428,6 +430,7 @@ class SetupController:
         self.state.gcode_path = None
         self.slicer.machine_config = config
         self.view.show_machine_config(config)
+        self.persist_machine_config(config)
         # Recenter the loaded model and check it against the new build volume.
         if self.state.current_model is not None:
             self._show_current_model()

@@ -4,6 +4,8 @@ from types import SimpleNamespace
 import pytest
 
 import main
+from models import MachineConfig
+from services.machine_config_io import save_machine_config
 
 
 class FakeServer:
@@ -16,12 +18,23 @@ class FakeServer:
         return callback
 
 
+class FakeStorage:
+    def __init__(self, value=None) -> None:
+        self.value = value
+
+    def get_item(self, key):
+        return self.value
+
+    def remove_item(self, key):
+        pass
+
+
 class FakeApp:
-    def __init__(self, client, workspace, slicing_slots) -> None:
+    def __init__(self, client, workspace, slicing_slots, machine_config) -> None:
         self.client = client
         self.workspace = workspace.path
         self.slicing_slots = slicing_slots
-        self.state = object()
+        self.state = SimpleNamespace(machine_config=machine_config)
         self.shown = False
         self.closed = False
 
@@ -38,11 +51,15 @@ def test_client_connections_have_independent_apps(monkeypatch) -> None:
     scene_clients = []
     monkeypatch.setattr(main, "AppController", FakeApp)
     monkeypatch.setattr(main, "configure_theme", themed_clients.append)
-    monkeypatch.setattr(main, "add_build_plate_scene", scene_clients.append)
+    monkeypatch.setattr(
+        main,
+        "add_build_plate_scene",
+        lambda client, config: scene_clients.append((client, config)),
+    )
     server = FakeServer()
     sessions = main.register_client_sessions(server)
-    first_client = SimpleNamespace(client_id=1)
-    second_client = SimpleNamespace(client_id=2)
+    first_client = SimpleNamespace(client_id=1, local_storage=FakeStorage())
+    second_client = SimpleNamespace(client_id=2, local_storage=FakeStorage())
 
     asyncio.run(server.connect(first_client))
     asyncio.run(server.connect(second_client))
@@ -56,7 +73,10 @@ def test_client_connections_have_independent_apps(monkeypatch) -> None:
     assert sessions[1].app.shown
     assert sessions[2].app.shown
     assert themed_clients == [first_client, second_client]
-    assert scene_clients == [first_client, second_client]
+    assert scene_clients == [
+        (first_client, main.DEFAULT_MACHINE_CONFIG),
+        (second_client, main.DEFAULT_MACHINE_CONFIG),
+    ]
 
     asyncio.run(server.disconnect(first_client))
     asyncio.run(server.disconnect(second_client))
@@ -66,11 +86,11 @@ def test_disconnect_closes_only_matching_client_app(monkeypatch) -> None:
     monkeypatch.delenv("MAX_CONCURRENT_SLICES", raising=False)
     monkeypatch.setattr(main, "AppController", FakeApp)
     monkeypatch.setattr(main, "configure_theme", lambda client: None)
-    monkeypatch.setattr(main, "add_build_plate_scene", lambda client: None)
+    monkeypatch.setattr(main, "add_build_plate_scene", lambda client, config: None)
     server = FakeServer()
     sessions = main.register_client_sessions(server)
-    first_client = SimpleNamespace(client_id=1)
-    second_client = SimpleNamespace(client_id=2)
+    first_client = SimpleNamespace(client_id=1, local_storage=FakeStorage())
+    second_client = SimpleNamespace(client_id=2, local_storage=FakeStorage())
     asyncio.run(server.connect(first_client))
     asyncio.run(server.connect(second_client))
     first_session = sessions[1]
@@ -88,6 +108,15 @@ def test_disconnect_closes_only_matching_client_app(monkeypatch) -> None:
     assert sessions == {2: second_session}
 
     asyncio.run(server.disconnect(second_client))
+
+
+def test_machine_config_is_loaded_from_browser_storage() -> None:
+    config = MachineConfig(name="Saved Pentos")
+    client = SimpleNamespace(
+        local_storage=FakeStorage(save_machine_config(config).decode())
+    )
+
+    assert main.load_client_machine_config(client) == config
 
 
 def test_concurrency_limit_comes_from_environment(monkeypatch) -> None:

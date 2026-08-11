@@ -54,6 +54,7 @@ def test_map_gcode_inverse_maps_and_compensates_extrusion() -> None:
     mapped = map_gcode_to_original(
         text,
         volume,
+        DEFAULT_MACHINE_CONFIG,
         max_segment_length=0.15,
     )
     moves = list(iter_gcode_moves(mapped.splitlines()))

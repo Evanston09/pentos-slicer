@@ -25,6 +25,6 @@ def test_preview_uses_each_endpoint_ab_pose() -> None:
         "A10 B0 E0.1\n"
     )
 
-    preview = parse_gcode_preview(text)
+    preview = parse_gcode_preview(text, DEFAULT_MACHINE_CONFIG)
 
     assert_allclose(preview.parts[0].extrusion[0], [start, end])

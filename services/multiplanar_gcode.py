@@ -11,7 +11,6 @@ from gcode_tools import (
     translate_gcode,
     trim_gcode,
 )
-from models import DEFAULT_MACHINE_CONFIG
 
 
 class MultiplanarChunk(Protocol):
@@ -58,7 +57,7 @@ def merge_gcode_files(
     gcode_paths: Sequence[Path],
     chunks: Sequence[MultiplanarChunk],
     output_path: Path,
-    machine_offset: Sequence[float] = DEFAULT_MACHINE_CONFIG.machine_offset,
+    machine_offset: Sequence[float],
 ) -> Path:
     if len(gcode_paths) != len(chunks):
         raise ValueError("G-code paths and chunks must have the same length")
@@ -111,7 +110,7 @@ def generate_debug_transition_check(
     gcode_paths: Sequence[Path],
     chunks: Sequence[MultiplanarChunk],
     output_path: Path,
-    machine_offset: Sequence[float] = DEFAULT_MACHINE_CONFIG.machine_offset,
+    machine_offset: Sequence[float],
 ) -> Path:
     if len(gcode_paths) != len(chunks):
         raise ValueError("G-code paths and chunks must have the same length")

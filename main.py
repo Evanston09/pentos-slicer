@@ -1,10 +1,13 @@
+import asyncio
 import os
 from dataclasses import dataclass
 from threading import BoundedSemaphore
 
 import viser
 
-from controllers.app_controller import AppController
+from controllers.app_controller import MACHINE_CONFIG_STORAGE_KEY, AppController
+from models import DEFAULT_MACHINE_CONFIG, MachineConfig
+from services.machine_config_io import load_machine_config
 from services.session_workspace import SessionWorkspace
 from views.theming import add_build_plate_scene, configure_theme
 
@@ -28,6 +31,21 @@ def max_concurrent_slices() -> int:
     return value
 
 
+def load_client_machine_config(client: viser.ClientHandle) -> MachineConfig:
+    try:
+        value = client.local_storage.get_item(MACHINE_CONFIG_STORAGE_KEY)
+        if value is None:
+            return DEFAULT_MACHINE_CONFIG
+        return load_machine_config(value.encode())
+    except (RuntimeError, TimeoutError, ValueError) as exc:
+        client.local_storage.remove_item(MACHINE_CONFIG_STORAGE_KEY)
+        print(f"Failed to load saved machine configuration: {exc}")
+        client.add_notification(
+            "Error", f"Failed to load saved machine configuration: {exc}"
+        )
+        return DEFAULT_MACHINE_CONFIG
+
+
 def register_client_sessions(
     server: viser.ViserServer,
 ) -> dict[int, ClientSession]:
@@ -37,10 +55,11 @@ def register_client_sessions(
     @server.on_client_connect
     async def _(client: viser.ClientHandle) -> None:
         configure_theme(client)
-        add_build_plate_scene(client)
+        machine_config = await asyncio.to_thread(load_client_machine_config, client)
+        add_build_plate_scene(client, machine_config)
         workspace = SessionWorkspace(client.client_id)
         try:
-            app = AppController(client, workspace, slicing_slots)
+            app = AppController(client, workspace, slicing_slots, machine_config)
         except Exception:
             workspace.close()
             raise
