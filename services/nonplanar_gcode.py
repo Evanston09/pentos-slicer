@@ -1,32 +1,47 @@
 import math
 
 import numpy as np
-
 from gcode_tools import GcodeCommand, iter_gcode_moves, parse_gcode_arg
 from machine import rotation_matrix
 from models import MachineConfig
-from services.slicing import Slicer
 from services.volumetric_deformation import TetrahedralVolume
 
 MAX_EXTRUSION_MULTIPLIER = 10.0
 
 
-def continuous_ab_angles(
+def _ab_angles(
     normal: np.ndarray,
-    previous: tuple[float, float],
+    previous_b: float,
+    machine_config: MachineConfig,
 ) -> tuple[float, float]:
-    """Choose the equivalent A/B pose nearest the previous commanded pose to prevent jumps."""
-    a_degrees, b_degrees = Slicer.ab_angles(normal)
-    candidates = ((a_degrees, b_degrees), (-a_degrees, b_degrees + 180.0))
-    unwrapped = [
-        (a, b + 360.0 * round((previous[1] - b) / 360.0)) for a, b in candidates
-    ]
-    return min(
-        unwrapped,
-        key=lambda angles: (
-            (angles[0] - previous[0]) ** 2 + (angles[1] - previous[1]) ** 2
-        ),
+    """Choose the nearest legal pose of a desired normal on a point in model within the allowed normal error."""
+    normal /= np.linalg.norm(normal)
+    # A unit normal tilted by θ from vertical has horizontal magnitude sin(θ).
+    tolerance = np.sin(np.radians(machine_config.max_normal_error_degrees))
+    target_b = (np.degrees(np.arctan2(-normal[1], -normal[0])) + 180.0) % 360.0 - 180.0
+    horizontal = np.hypot(normal[0], normal[1])
+    width = (
+        180.0
+        if horizontal <= tolerance
+        else np.degrees(np.arcsin(tolerance / horizontal))
     )
+    min_turn = math.ceil((machine_config.b_degrees_min - target_b) / 180.0)
+    max_turn = math.floor((machine_config.b_degrees_max - target_b) / 180.0)
+    candidates = [
+        target_b + 180.0 * turn for turn in range(min_turn, max_turn + 1)
+    ]
+    center = min(candidates, key=lambda value: abs(value - previous_b))
+    b_degrees = float(
+        np.clip(
+            previous_b,
+            max(machine_config.b_degrees_min, center - width),
+            min(machine_config.b_degrees_max, center + width),
+        )
+    )
+    b = np.radians(b_degrees)
+    # Positive A points towards -X
+    horizontal = -(normal[0] * np.cos(b) + normal[1] * np.sin(b))
+    return float(np.degrees(np.arctan2(horizontal, normal[2]))), b_degrees
 
 
 def map_gcode_to_original(
@@ -43,7 +58,7 @@ def map_gcode_to_original(
     moves = {move.index: move for move in iter_gcode_moves(lines)}
     mapped_lines = []
     has_seen_layer = False
-    previous_ab = (0.0, 0.0)
+    previous_b = 0.0
     last_emitted_xyz: np.ndarray | None = None
 
     for index, line in enumerate(lines):
@@ -61,6 +76,17 @@ def map_gcode_to_original(
             or move.end_xyz is None
         ):
             mapped_lines.append(line)
+            if parsed.command == "ENABLE_FIVE_AXIS":
+                mapped_lines.extend(
+                    (
+                        "MANUAL_STEPPER STEPPER=a_motor GCODE_AXIS=A "
+                        f"LIMIT_VELOCITY={machine_config.a_max_velocity_deg_s:g} "
+                        f"LIMIT_ACCEL={machine_config.a_max_acceleration_deg_s2:g}\n",
+                        "MANUAL_STEPPER STEPPER=b_motor GCODE_AXIS=B "
+                        f"LIMIT_VELOCITY={machine_config.b_max_velocity_deg_s:g} "
+                        f"LIMIT_ACCEL={machine_config.b_max_acceleration_deg_s2:g}\n",
+                    )
+                )
             if move is not None and move.end_xyz is not None:
                 last_emitted_xyz = move.end_xyz
             continue
@@ -68,12 +94,6 @@ def map_gcode_to_original(
         distance = float(np.linalg.norm(move.end_xyz - move.start_xyz))
         if distance > 0.0 and move.feedrate is None:
             raise ValueError("Mapped G-code move has no feedrate")
-        segment_count = max(1, math.ceil(distance / max_segment_length))
-        points = move.start_xyz + (
-            np.arange(1, segment_count + 1)[:, None]
-            / segment_count
-            * (move.end_xyz - move.start_xyz)
-        )
         if move.extrusion_delta > 0.0 and move.is_absolute_extrusion:
             raise ValueError(
                 "Nonplanar extrusion compensation requires relative extrusion"
@@ -81,22 +101,29 @@ def map_gcode_to_original(
 
         stripped = line.rstrip("\r\n")
         ending = line[len(stripped) :]
+        segment_count = max(1, math.ceil(distance / max_segment_length))
+        points = move.start_xyz + (
+            np.arange(1, segment_count + 1)[:, None]
+            / segment_count
+            * (move.end_xyz - move.start_xyz)
+        )
         try:
             local_points = points - machine_config.machine_offset
-            original_points = volume.map_to_original(local_points)
-            extrusion_multipliers = (
-                np.minimum(
-                    volume.extrusion_multipliers(local_points),
-                    MAX_EXTRUSION_MULTIPLIER,
-                )
-                if move.extrusion_delta > 0.0
-                else np.ones(segment_count)
+            original_points, extrusion_multipliers, normals = (
+                volume.inverse_map_properties(local_points)
             )
-            normals = volume.layer_normals(original_points)
             angles = []
             for normal in normals:
-                previous_ab = continuous_ab_angles(normal, previous_ab)
-                angles.append(previous_ab)
+                angle = _ab_angles(normal, previous_b, machine_config)
+                angles.append(angle)
+                previous_b = angle[1]
+            if move.extrusion_delta > 0.0:
+                extrusion_multipliers = np.minimum(
+                    extrusion_multipliers,
+                    MAX_EXTRUSION_MULTIPLIER,
+                )
+            else:
+                extrusion_multipliers = np.ones(segment_count)
             center = np.asarray(machine_config.rotation_center_local_mm)
             offset = np.asarray(machine_config.machine_offset)
             mapped = np.asarray(
@@ -108,10 +135,10 @@ def map_gcode_to_original(
                 ]
             )
         except ValueError:
-            # keep out-of-volume setup and skirt moves planar for preview.
-            previous_ab = (0.0, 0.0)
+            # Keep out-of-volume setup and skirt moves planar for preview.
+            previous_b = 0.0
             mapped = np.asarray([move.end_xyz])
-            angles = [previous_ab]
+            angles = [(0.0, 0.0)]
             extrusion_multipliers = np.ones(1)
             segment_count = 1
 

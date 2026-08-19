@@ -10,6 +10,7 @@ from models import GuideSurfaceSnapshot
 from services.auto_planes import quaternion_from_z_to
 from services.model_tools import load_model
 from services.volumetric_deformation import (
+    TetrahedralVolume,
     _tetrahedron_determinants,
     solve_guide_deformation,
     solve_guide_scalar_field,
@@ -100,6 +101,29 @@ def test_curved_guides_produce_an_injective_scalar_flattening() -> None:
     assert normals[0, 0] > 0.0 > normals[1, 0]
 
 
+def test_layer_normals_are_continuous_across_tetrahedra() -> None:
+    vertices = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, -1.0],
+        ]
+    )
+    volume = TetrahedralVolume(
+        original_vertices=vertices,
+        deformed_vertices=vertices.copy(),
+        tetrahedra=np.array([[0, 1, 2, 3], [0, 2, 1, 4]]),
+        boundary_faces=np.empty((0, 3), dtype=int),
+        scalar_values=np.array([0.0, 1.0, 0.0, 1.0, 0.0]),
+    )
+
+    normals = volume.layer_normals([[0.2, 0.2, 1e-4], [0.2, 0.2, -1e-4]])
+
+    assert_allclose(normals[0], normals[1], atol=1e-4)
+
+
 def test_harmonic_field_derives_heights_and_normals_from_one_solution() -> None:
     volume = tetrahedralize(trimesh.creation.box())
     guides = [guide(0, [0.0, 0.0, -0.5]), guide(1, [0.0, 0.0, 0.5])]
@@ -167,6 +191,20 @@ def test_barycentric_mapping_rejects_outside_points() -> None:
 
     with pytest.raises(ValueError, match="Point 0 is outside"):
         volume.map_to_deformed(np.array([[2.0, 2.0, 2.0]]))
+
+
+def test_inverse_mapping_extrapolates_nearby_perimeter_paths() -> None:
+    volume = tetrahedralize(trimesh.creation.box())
+    volume.scalar_values = volume.original_vertices[:, 2]
+    point = np.array([[0.6, 0.0, 0.0]])
+
+    mapped, multipliers, normals = volume.inverse_map_properties(point)
+
+    assert_allclose(mapped, point, atol=1e-12)
+    assert_allclose(multipliers, 1.0)
+    assert_allclose(normals, [[0.0, 0.0, 1.0]], atol=1e-12)
+    with pytest.raises(ValueError, match="Point 0 is outside"):
+        volume.inverse_map_properties([[2.0, 2.0, 2.0]])
 
 
 def test_barycentric_mapping_allows_s4_style_inverted_cells() -> None:

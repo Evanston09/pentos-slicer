@@ -15,6 +15,7 @@ from services.auto_planes import quaternion_from_z_to
 # Tetrahedral inverse mapping follows Joshua Bird's GPL-3.0 S4 Slicer.
 
 BARYCENTRIC_TOLERANCE = 1e-6
+MAX_EXTRAPOLATION_DISTANCE = 1.0
 
 
 @dataclass(frozen=True)
@@ -44,14 +45,26 @@ class TetrahedralVolume:
     _deformed_locator: _TetrahedronLocator | None = field(
         default=None, init=False, repr=False
     )
+    _layer_vertex_gradients: np.ndarray | None = field(
+        default=None, init=False, repr=False
+    )
 
     def locate_original(self, points: np.ndarray) -> BarycentricLocations:
         """Locate points in the original volume and return barycentric coordinates."""
         return self._locate(points, self.original_vertices)
 
-    def locate_deformed(self, points: np.ndarray) -> BarycentricLocations:
+    def locate_deformed(
+        self,
+        points: np.ndarray,
+        *,
+        allow_extrapolation: bool = False,
+    ) -> BarycentricLocations:
         """Locate points in the deformed volume and return barycentric coordinates."""
-        return self._locate(points, self.deformed_vertices)
+        return self._locate(
+            points,
+            self.deformed_vertices,
+            allow_extrapolation=allow_extrapolation,
+        )
 
     def map_to_original(self, points: np.ndarray) -> np.ndarray:
         """Map points from the deformed volume back to the original volume."""
@@ -65,15 +78,52 @@ class TetrahedralVolume:
 
     def layer_normals(self, points: np.ndarray) -> np.ndarray:
         """Return scalar-field normals for points in the original volume."""
+        return self._layer_normals(self.locate_original(points))
+
+    def inverse_map_properties(
+        self,
+        points: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Extrapolate nearby toolpaths and return positions, flow ratios, and normals."""
+        locations = self.locate_deformed(points, allow_extrapolation=True)
+        return (
+            self._interpolate(locations, self.original_vertices),
+            self._extrusion_multipliers(locations),
+            self._layer_normals(locations),
+        )
+
+    def _layer_normals(self, locations: BarycentricLocations) -> np.ndarray:
         if self.scalar_values is None:
             raise ValueError("The volume has no solved layer field")
-        locations = self.locate_original(points)
-        gradients = self.scalar_gradients()[locations.tetrahedron_indices]
+        if self._layer_vertex_gradients is None:
+            tetrahedron_gradients = self.scalar_gradients()
+            volumes = np.abs(
+                _tetrahedron_determinants(self.original_vertices, self.tetrahedra)
+            )
+            vertex_gradients = np.zeros_like(self.original_vertices)
+            vertex_weights = np.zeros(len(self.original_vertices))
+            np.add.at(
+                vertex_gradients,
+                self.tetrahedra.ravel(),
+                np.repeat(tetrahedron_gradients * volumes[:, None], 4, axis=0),
+            )
+            np.add.at(
+                vertex_weights,
+                self.tetrahedra.ravel(),
+                np.repeat(volumes, 4),
+            )
+            self._layer_vertex_gradients = vertex_gradients / vertex_weights[:, None]
+        gradients = self._interpolate(locations, self._layer_vertex_gradients)
         return gradients / np.linalg.norm(gradients, axis=1, keepdims=True)
 
     def extrusion_multipliers(self, points: np.ndarray) -> np.ndarray:
         """Return original-to-deformed tetrahedron volume ratios at points."""
-        locations = self.locate_deformed(points)
+        return self._extrusion_multipliers(self.locate_deformed(points))
+
+    def _extrusion_multipliers(
+        self,
+        locations: BarycentricLocations,
+    ) -> np.ndarray:
         tetrahedra = self.tetrahedra[locations.tetrahedron_indices]
         original = np.abs(_tetrahedron_determinants(self.original_vertices, tetrahedra))
         deformed = np.abs(_tetrahedron_determinants(self.deformed_vertices, tetrahedra))
@@ -106,6 +156,8 @@ class TetrahedralVolume:
         self,
         points: np.ndarray,
         vertices: np.ndarray,
+        *,
+        allow_extrapolation: bool = False,
     ) -> BarycentricLocations:
         """Find containing tetrahedra using spatial and barycentric containment tests."""
         points = np.asarray(points, dtype=np.float64)
@@ -121,20 +173,21 @@ class TetrahedralVolume:
         weights = np.empty((len(points), 4), dtype=np.float64)
 
         for point_index, point in enumerate(points):
-            candidates = np.fromiter(
-                spatial_index.intersection(
-                    (
-                        *point - locator.point_tolerance,
-                        *point + locator.point_tolerance,
-                    )
-                ),
-                dtype=np.int32,
-            )
-            if not len(candidates):
-                raise ValueError(
-                    f"Point {point_index} is outside the tetrahedral volume"
+            if allow_extrapolation:
+                candidates = np.fromiter(
+                    spatial_index.nearest((*point, *point), 256),
+                    dtype=np.int32,
                 )
-
+            else:
+                candidates = np.fromiter(
+                    spatial_index.intersection(
+                        (
+                            *point - locator.point_tolerance,
+                            *point + locator.point_tolerance,
+                        )
+                    ),
+                    dtype=np.int32,
+                )
             coordinates = np.einsum(
                 "nij,nj->ni",
                 inverse_edges[candidates],
@@ -147,16 +200,30 @@ class TetrahedralVolume:
                 candidate_weights <= 1.0 + tolerance,
                 axis=1,
             )
-            if not np.any(contained):
-                raise ValueError(
-                    f"Point {point_index} is outside the tetrahedral volume"
-                )
 
-            # ponytail: preview-only fallback; machine output must reject folds.
-            match = int(np.flatnonzero(contained)[0])
-            tetrahedron_indices[point_index] = candidates[match]
-            point_weights = np.clip(candidate_weights[match], 0.0, 1.0)
-            weights[point_index] = point_weights / point_weights.sum()
+            if np.any(contained):
+                match = int(np.flatnonzero(contained)[0])
+                tetrahedron_indices[point_index] = candidates[match]
+                point_weights = np.clip(candidate_weights[match], 0.0, 1.0)
+                weights[point_index] = point_weights / point_weights.sum()
+                continue
+
+            if allow_extrapolation:
+                clipped = np.clip(candidate_weights, 0.0, 1.0)
+                clipped /= clipped.sum(axis=1, keepdims=True)
+                projected = np.einsum(
+                    "ni,nij->nj",
+                    clipped,
+                    tetrahedron_points[candidates],
+                )
+                distances = np.linalg.norm(projected - point, axis=1)
+                match = int(distances.argmin())
+                if distances[match] <= MAX_EXTRAPOLATION_DISTANCE:
+                    tetrahedron_indices[point_index] = candidates[match]
+                    weights[point_index] = candidate_weights[match]
+                    continue
+
+            raise ValueError(f"Point {point_index} is outside the tetrahedral volume")
 
         return BarycentricLocations(tetrahedron_indices, weights)
 
@@ -274,6 +341,7 @@ def solve_guide_scalar_field(
         btol=1e-12,
     )[0]
     volume.scalar_values = scalar_values
+    volume._layer_vertex_gradients = None
 
     gradient_lengths = np.linalg.norm(volume.scalar_gradients(), axis=1)
     if np.any(gradient_lengths < 1e-8):
