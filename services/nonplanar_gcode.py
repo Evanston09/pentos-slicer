@@ -7,6 +7,8 @@ from models import MachineConfig
 from services.volumetric_deformation import TetrahedralVolume
 
 MAX_EXTRUSION_MULTIPLIER = 10.0
+PLANAR_BASE_LAYERS = 2
+NONPLANAR_TRANSITION_LAYERS = 4
 
 
 def _ab_angles(
@@ -55,18 +57,18 @@ def map_gcode_to_original(
     lines = text.splitlines(keepends=True)
     moves = {move.index: move for move in iter_gcode_moves(lines)}
     mapped_lines = []
-    has_seen_layer = False
+    layer_index = -1
     previous_b = 0.0
     last_emitted_xyz: np.ndarray | None = None
 
     for index, line in enumerate(lines):
         parsed = GcodeCommand.parse(line)
         if parsed.comment == "LAYER_CHANGE":
-            has_seen_layer = True
+            layer_index += 1
 
         move = moves.get(index)
         if (
-            not has_seen_layer
+            layer_index < PLANAR_BASE_LAYERS
             or move is None
             or not move.is_absolute_xyz
             or not move.has_xyz
@@ -99,6 +101,14 @@ def map_gcode_to_original(
             original_points, extrusion_multipliers, normals = (
                 volume.inverse_map_properties(local_points)
             )
+            blend = min(
+                1.0,
+                (layer_index - PLANAR_BASE_LAYERS + 1) / NONPLANAR_TRANSITION_LAYERS,
+            )
+            original_points = local_points + blend * (original_points - local_points)
+            extrusion_multipliers = 1.0 + blend * (extrusion_multipliers - 1.0)
+            normals = np.array([0.0, 0.0, 1.0]) + blend * (normals - [0.0, 0.0, 1.0])
+            normals /= np.linalg.norm(normals, axis=1, keepdims=True)
             angles = []
             for normal in normals:
                 angle = _ab_angles(normal, previous_b, machine_config)
