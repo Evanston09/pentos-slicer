@@ -6,6 +6,7 @@ from typing import Protocol
 import numpy as np
 import trimesh
 
+from gcode_tools import translate_gcode
 from machine import rotation_matrix
 from models import MachineConfig
 from services.multiplanar_gcode import (
@@ -104,6 +105,12 @@ class Slicer:
 
         gcode_paths = self.run_prusa_slicer(chunks)
         output_path = self.out_dir / f"{source_name}.gcode"
+        if len(gcode_paths) == 1:
+            lines = gcode_paths[0].read_text().splitlines(keepends=True)
+            output_path.write_text(
+                "".join(translate_gcode(lines, self.machine_config.machine_offset))
+            )
+            return output_path
         return merge_gcode_files(
             gcode_paths,
             chunks,

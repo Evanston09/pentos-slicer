@@ -1,5 +1,3 @@
-from dataclasses import replace
-
 import numpy as np
 from numpy.testing import assert_allclose
 
@@ -70,27 +68,14 @@ def test_map_gcode_inverse_maps_and_compensates_extrusion() -> None:
         f"G1 X{end[0]} Y{end[1]} Z{end[2]} E0.9\n"
     )
 
-    machine_config = replace(
-        DEFAULT_MACHINE_CONFIG,
-        a_max_velocity_deg_s=8.0,
-        a_max_acceleration_deg_s2=40.0,
-        b_max_velocity_deg_s=16.0,
-        b_max_acceleration_deg_s2=80.0,
-    )
     mapped = map_gcode_to_original(
         text,
         volume,
-        machine_config,
+        DEFAULT_MACHINE_CONFIG,
         max_segment_length=0.15,
     )
     moves = list(iter_gcode_moves(mapped.splitlines()))
 
-    assert (
-        "MANUAL_STEPPER STEPPER=a_motor GCODE_AXIS=A LIMIT_VELOCITY=8 LIMIT_ACCEL=40\n"
-    ) in mapped
-    assert (
-        "MANUAL_STEPPER STEPPER=b_motor GCODE_AXIS=B LIMIT_VELOCITY=16 LIMIT_ACCEL=80\n"
-    ) in mapped
     assert len(moves) == 4
     assert_allclose(moves[-1].end_xyz, offset + [0.2, 0.1, 0.1])
     assert_allclose([move.extrusion_delta for move in moves[1:]], [0.15, 0.15, 0.15])

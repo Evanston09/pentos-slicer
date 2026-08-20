@@ -27,9 +27,7 @@ def _ab_angles(
     )
     min_turn = math.ceil((machine_config.b_degrees_min - target_b) / 180.0)
     max_turn = math.floor((machine_config.b_degrees_max - target_b) / 180.0)
-    candidates = [
-        target_b + 180.0 * turn for turn in range(min_turn, max_turn + 1)
-    ]
+    candidates = [target_b + 180.0 * turn for turn in range(min_turn, max_turn + 1)]
     center = min(candidates, key=lambda value: abs(value - previous_b))
     b_degrees = float(
         np.clip(
@@ -76,17 +74,6 @@ def map_gcode_to_original(
             or move.end_xyz is None
         ):
             mapped_lines.append(line)
-            if parsed.command == "ENABLE_FIVE_AXIS":
-                mapped_lines.extend(
-                    (
-                        "MANUAL_STEPPER STEPPER=a_motor GCODE_AXIS=A "
-                        f"LIMIT_VELOCITY={machine_config.a_max_velocity_deg_s:g} "
-                        f"LIMIT_ACCEL={machine_config.a_max_acceleration_deg_s2:g}\n",
-                        "MANUAL_STEPPER STEPPER=b_motor GCODE_AXIS=B "
-                        f"LIMIT_VELOCITY={machine_config.b_max_velocity_deg_s:g} "
-                        f"LIMIT_ACCEL={machine_config.b_max_acceleration_deg_s2:g}\n",
-                    )
-                )
             if move is not None and move.end_xyz is not None:
                 last_emitted_xyz = move.end_xyz
             continue
