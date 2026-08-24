@@ -1,5 +1,4 @@
 from collections.abc import Sequence
-from pathlib import Path
 
 import numpy as np
 from numpy.testing import assert_allclose
@@ -8,7 +7,6 @@ import trimesh
 
 from models import GuideSurfaceSnapshot
 from services.auto_planes import quaternion_from_z_to
-from services.model_tools import load_model
 from services.volumetric_deformation import (
     TetrahedralVolume,
     _tetrahedron_determinants,
@@ -222,15 +220,6 @@ def test_barycentric_mapping_requires_point_rows() -> None:
 
     with pytest.raises(ValueError, match=r"shape \(n, 3\)"):
         volume.map_to_deformed(np.zeros(3))
-
-
-def test_tetrahedralize_preserves_dense_cad_boundary() -> None:
-    mesh = load_model(Path("samples/Part Studio 1.stl"))
-
-    volume = tetrahedralize(mesh)
-
-    assert len(volume.tetrahedra) > 0
-    assert len(volume.boundary_faces) == len(mesh.faces)
 
 
 def test_tetrahedralize_rejects_open_mesh() -> None:

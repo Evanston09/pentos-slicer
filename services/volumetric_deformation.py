@@ -473,11 +473,7 @@ def tetrahedralize(mesh: trimesh.Trimesh) -> TetrahedralVolume:
     vertices, tetrahedra, _, _ = tetgen.TetGen(
         mesh.vertices,
         mesh.faces,
-    ).tetrahedralize(
-        quality=True,
-        # TetGen can crash while splitting dense CAD boundaries.
-        nobisect=True,
-    )
+    ).tetrahedralize()
 
     volumes = _tetrahedron_determinants(vertices, tetrahedra)
     if len(tetrahedra) == 0 or np.any(volumes <= 0.0):

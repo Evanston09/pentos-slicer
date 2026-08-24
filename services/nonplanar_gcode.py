@@ -17,7 +17,7 @@ def _ab_angles(
     machine_config: MachineConfig,
 ) -> tuple[float, float]:
     """Choose the nearest legal pose of a desired normal on a point in model within the allowed normal error."""
-    normal /= np.linalg.norm(normal)
+    normal = normal / np.linalg.norm(normal)
     # A unit normal tilted by θ from vertical has horizontal magnitude sin(θ).
     tolerance = np.sin(np.radians(machine_config.max_normal_error_degrees))
     target_b = (np.degrees(np.arctan2(-normal[1], -normal[0])) + 180.0) % 360.0 - 180.0
