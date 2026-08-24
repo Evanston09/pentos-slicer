@@ -176,6 +176,10 @@ class SetupView:
                 "Auto Planes",
                 disabled=state.current_model is None,
             )
+            debug_mode = self.client.gui.add_checkbox(
+                "Debug Mode",
+                state.debug_mode,
+            )
         nonplanar_folder = self.client.gui.add_folder(
             "Nonplanar",
             expand_by_default=True,
@@ -187,10 +191,6 @@ class SetupView:
                 "Add Guide Surface",
                 icon=viser.Icon.SQUARES_DIAGONAL,
             )
-        debug_mode = self.client.gui.add_checkbox(
-            "Debug Mode",
-            state.debug_mode,
-        )
         export_button = self.client.gui.add_button(
             "Export Scene",
             icon=viser.Icon.PACKAGE_EXPORT,
