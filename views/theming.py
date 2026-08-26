@@ -51,8 +51,9 @@ def add_build_plate_scene(
     config: MachineConfig,
 ) -> None:
     width, depth, height = config.build_volume_mm
+    client.scene.add_frame("/shared/build_plate", show_axes=False)
     client.scene.add_grid(
-        "/shared/grid",
+        "/shared/build_plate/grid",
         width=width,
         height=depth,
         cell_size=5.0,
@@ -115,7 +116,7 @@ def add_build_plate_scene(
         (7, 4),
     )
     client.scene.add_line_segments(
-        "/shared/build_volume/outline",
+        "/shared/build_plate/build_volume/outline",
         points=np.array(
             [[corners[start], corners[end]] for start, end in edge_indices]
         ),

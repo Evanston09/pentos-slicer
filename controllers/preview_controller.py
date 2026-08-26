@@ -1,3 +1,4 @@
+from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
@@ -50,16 +51,23 @@ class PreviewController:
             return
 
         self.view.show_preview(preview)
-        extrusion_count = sum(len(part.extrusion) for part in preview.parts)
-        travel_count = sum(len(part.travel) for part in preview.parts)
+        visible_steps = [
+            step
+            for step in preview.simulation_steps
+            if step.preview_segment is not None and step.kind != "transition"
+        ]
+        counts = Counter(step.kind for step in visible_steps)
+        part_count = len(
+            {step.part_index for step in visible_steps if step.part_index is not None}
+        )
         estimate = parse_estimated_print_time(text)
         if estimate is not None:
             self.view.set_estimated_time(format_print_time(estimate))
         self.view.set_status(
-            f"Preview: {len(preview.parts)} parts, "
-            f"{extrusion_count} extrusion, "
-            f"{travel_count} travel, "
-            f"{len(preview.setup)} setup"
+            f"Preview: {part_count} parts, "
+            f"{counts['extrusion']} extrusion, "
+            f"{counts['travel']} travel, "
+            f"{counts['setup']} setup"
         )
 
     def download_gcode(self) -> tuple[str, bytes] | None:
