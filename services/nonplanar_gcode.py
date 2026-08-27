@@ -11,15 +11,24 @@ PLANAR_BASE_LAYERS = 2
 NONPLANAR_TRANSITION_LAYERS = 4
 
 
+def _commanded_normal(angles: tuple[float, float]) -> np.ndarray:
+    return rotation_matrix(*angles).T @ np.array([0.0, 0.0, 1.0])
+
+
 def _ab_angles(
     normal: np.ndarray,
-    previous_b: float,
+    previous_angles: tuple[float, float],
     machine_config: MachineConfig,
 ) -> tuple[float, float]:
-    """Choose the nearest legal pose of a desired normal on a point in model within the allowed normal error."""
+    """Keep the previous pose while it remains within the configured tolerance."""
     normal = normal / np.linalg.norm(normal)
+    max_error_radians = np.radians(machine_config.max_normal_error_degrees)
+    maximum_dot = np.cos(max_error_radians)
+    if np.dot(normal, _commanded_normal(previous_angles)) >= maximum_dot:
+        return previous_angles
+
     # A unit normal tilted by θ from vertical has horizontal magnitude sin(θ).
-    tolerance = np.sin(np.radians(machine_config.max_normal_error_degrees))
+    tolerance = np.sin(max_error_radians)
     target_b = (np.degrees(np.arctan2(-normal[1], -normal[0])) + 180.0) % 360.0 - 180.0
     horizontal = np.hypot(normal[0], normal[1])
     width = (
@@ -30,18 +39,26 @@ def _ab_angles(
     min_turn = math.ceil((machine_config.b_degrees_min - target_b) / 180.0)
     max_turn = math.floor((machine_config.b_degrees_max - target_b) / 180.0)
     candidates = [target_b + 180.0 * turn for turn in range(min_turn, max_turn + 1)]
-    center = min(candidates, key=lambda value: abs(value - previous_b))
+    center_b = min(candidates, key=lambda value: abs(value - previous_angles[1]))
     b_degrees = float(
         np.clip(
-            previous_b,
-            max(machine_config.b_degrees_min, center - width),
-            min(machine_config.b_degrees_max, center + width),
+            previous_angles[1],
+            max(machine_config.b_degrees_min, center_b - width),
+            min(machine_config.b_degrees_max, center_b + width),
         )
     )
+
+    # For the selected B, keep A as close as possible while remaining legal.
     b = np.radians(b_degrees)
-    # Positive A points towards -X
-    horizontal = -(normal[0] * np.cos(b) + normal[1] * np.sin(b))
-    return float(np.degrees(np.arctan2(horizontal, normal[2]))), b_degrees
+    projected = -(normal[0] * np.cos(b) + normal[1] * np.sin(b))
+    center_a = np.degrees(np.arctan2(projected, normal[2]))
+    center_a += 360.0 * round((previous_angles[0] - center_a) / 360.0)
+    reachable_dot = np.hypot(projected, normal[2])
+    half_width = np.degrees(np.arccos(np.clip(maximum_dot / reachable_dot, -1.0, 1.0)))
+    a_degrees = float(
+        np.clip(previous_angles[0], center_a - half_width, center_a + half_width)
+    )
+    return a_degrees, b_degrees
 
 
 def map_gcode_to_original(
@@ -58,7 +75,7 @@ def map_gcode_to_original(
     moves = {move.index: move for move in iter_gcode_moves(lines)}
     mapped_lines = []
     layer_index = -1
-    previous_b = 0.0
+    previous_angles = (0.0, 0.0)
     last_emitted_xyz: np.ndarray | None = None
 
     for index, line in enumerate(lines):
@@ -111,9 +128,12 @@ def map_gcode_to_original(
             normals /= np.linalg.norm(normals, axis=1, keepdims=True)
             angles = []
             for normal in normals:
-                angle = _ab_angles(normal, previous_b, machine_config)
-                angles.append(angle)
-                previous_b = angle[1]
+                previous_angles = _ab_angles(
+                    normal,
+                    previous_angles,
+                    machine_config,
+                )
+                angles.append(previous_angles)
             if move.extrusion_delta > 0.0:
                 extrusion_multipliers = np.minimum(
                     extrusion_multipliers,
@@ -133,7 +153,7 @@ def map_gcode_to_original(
             )
         except ValueError:
             # Keep out-of-volume setup and skirt moves planar for preview.
-            previous_b = 0.0
+            previous_angles = (0.0, 0.0)
             mapped = np.asarray([move.end_xyz])
             angles = [(0.0, 0.0)]
             extrusion_multipliers = np.ones(1)

@@ -36,7 +36,7 @@ def load_machine_config(content: bytes) -> MachineConfig:
     if not isinstance(name, str) or not name.strip() or len(name) > 100:
         raise ValueError("Machine name must be between 1 and 100 characters")
 
-    max_normal_error_degrees = _positive_number(data, "max_normal_error_degrees", 2.0)
+    max_normal_error_degrees = _positive_number(data, "max_normal_error_degrees", 1.0)
     if max_normal_error_degrees > 90.0:
         raise ValueError("max_normal_error_degrees must not exceed 90")
     b_degrees_min = _number(data, "b_degrees_min", -180.0)
@@ -49,13 +49,13 @@ def load_machine_config(content: bytes) -> MachineConfig:
         build_volume_mm=_vector(data, "build_volume_mm", positive=True),
         machine_plate_center_mm=_vector(data, "machine_plate_center_mm"),
         rotation_center_machine_mm=_vector(data, "rotation_center_machine_mm"),
-        a_max_velocity_deg_s=_positive_number(data, "a_max_velocity_deg_s", 10.0),
+        a_max_velocity_deg_s=_positive_number(data, "a_max_velocity_deg_s", 200.0),
         a_max_acceleration_deg_s2=_positive_number(
-            data, "a_max_acceleration_deg_s2", 50.0
+            data, "a_max_acceleration_deg_s2", 1000.0
         ),
-        b_max_velocity_deg_s=_positive_number(data, "b_max_velocity_deg_s", 20.0),
+        b_max_velocity_deg_s=_positive_number(data, "b_max_velocity_deg_s", 200.0),
         b_max_acceleration_deg_s2=_positive_number(
-            data, "b_max_acceleration_deg_s2", 100.0
+            data, "b_max_acceleration_deg_s2", 1000.0
         ),
         max_normal_error_degrees=max_normal_error_degrees,
         b_degrees_min=b_degrees_min,

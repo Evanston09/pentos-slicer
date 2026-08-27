@@ -3,7 +3,11 @@ from numpy.testing import assert_allclose
 
 from gcode_tools import iter_gcode_moves
 from models import DEFAULT_MACHINE_CONFIG
-from services.nonplanar_gcode import _ab_angles, map_gcode_to_original
+from services.nonplanar_gcode import (
+    _ab_angles,
+    _commanded_normal,
+    map_gcode_to_original,
+)
 from services.volumetric_deformation import TetrahedralVolume
 
 
@@ -18,26 +22,60 @@ def test_ab_angles_hold_b_near_vertical_and_track_real_tilt() -> None:
     )
 
     angles = []
-    previous_b = 0.0
+    previous_angles = (0.0, 0.0)
     for normal in normals:
-        angle = _ab_angles(normal, previous_b, DEFAULT_MACHINE_CONFIG)
-        angles.append(angle)
-        previous_b = angle[1]
+        previous_angles = _ab_angles(
+            normal,
+            previous_angles,
+            DEFAULT_MACHINE_CONFIG,
+        )
+        angles.append(previous_angles)
     angles = np.asarray(angles)
 
     assert_allclose(angles[:2, 1], 0.0, atol=1e-4)
     assert abs(angles[2, 1]) > 84.0
     assert np.all(np.abs(angles[:, 1]) <= 180.0)
-    a = np.radians(angles[:, 0])
-    b = np.radians(angles[:, 1])
-    commanded = np.column_stack(
-        (-np.sin(a) * np.cos(b), -np.sin(a) * np.sin(b), np.cos(a))
-    )
+    commanded = np.asarray([_commanded_normal(tuple(angle)) for angle in angles])
     normals /= np.linalg.norm(normals, axis=1, keepdims=True)
     errors = np.degrees(
         np.arccos(np.clip(np.sum(commanded * normals, axis=1), -1.0, 1.0))
     )
     assert np.all(errors <= DEFAULT_MACHINE_CONFIG.max_normal_error_degrees + 0.01)
+
+
+def test_ab_angles_hold_pose_and_move_only_as_far_as_needed() -> None:
+    target_angles = [(0.0, 0.0), (0.6, 0.0), (1.2, 0.0), (2.0, 0.0)]
+    previous_angles = (0.0, 0.0)
+    commanded_angles = []
+
+    for target in target_angles:
+        previous_angles = _ab_angles(
+            _commanded_normal(target),
+            previous_angles,
+            DEFAULT_MACHINE_CONFIG,
+        )
+        commanded_angles.append(previous_angles)
+
+    assert_allclose(
+        commanded_angles,
+        [(0.0, 0.0), (0.0, 0.0), (0.2, 0.0), (1.0, 0.0)],
+        atol=1e-6,
+    )
+
+
+def test_ab_angles_remove_small_oscillations() -> None:
+    previous_angles = (0.0, 0.0)
+    commanded_angles = []
+
+    for target_a in [0.6, -0.6, 0.4, -0.4]:
+        previous_angles = _ab_angles(
+            _commanded_normal((target_a, 0.0)),
+            previous_angles,
+            DEFAULT_MACHINE_CONFIG,
+        )
+        commanded_angles.append(previous_angles)
+
+    assert_allclose(commanded_angles, 0.0, atol=1e-8)
 
 
 def test_map_gcode_inverse_maps_and_compensates_extrusion() -> None:
