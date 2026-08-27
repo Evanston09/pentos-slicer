@@ -104,9 +104,3 @@ Use Ruff formatting and 4-space indentation. Prefer type annotations for public 
 ## Testing Guidelines
 
 Run `uv run pytest` for automated coverage. Validate visible or machine-facing changes manually with `uv run python main.py`, load a sample or uploaded model, exercise plane controls, run slicing when `prusa-slicer` is available, and inspect the generated files in `output/`. Use `uv run python -m compileall .` as a quick syntax check before handing off changes.
-
-## Commit & Pull Request Guidelines
-
-Recent commits use short, imperative summaries such as `Clean up logic and fix rotation bug` and `Add build plate to viewport and represent in mm`. Follow that style: one clear sentence, present tense, and focused scope.
-
-Pull requests should describe the behavior change, note any manual testing performed, and call out dependencies such as PrusaSlicer or sample model files. Include screenshots or screen recordings for visible UI changes in the Viser scene.

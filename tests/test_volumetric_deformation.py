@@ -9,6 +9,7 @@ from models import GuideSurfaceSnapshot
 from services.auto_planes import quaternion_from_z_to
 from services.volumetric_deformation import (
     TetrahedralVolume,
+    _guide_constraints,
     _tetrahedron_determinants,
     solve_guide_deformation,
     solve_guide_scalar_field,
@@ -133,6 +134,90 @@ def test_harmonic_field_derives_heights_and_normals_from_one_solution() -> None:
         volume.layer_normals([[0.0, 0.0, 0.0]]),
         [[0.0, 0.0, 1.0]],
         atol=1e-5,
+    )
+    assert_allclose(
+        volume.scalar_gradients(),
+        np.tile([0.0, 0.0, 1.0], (len(volume.tetrahedra), 1)),
+        atol=1e-8,
+    )
+
+
+def test_neighbour_smoothing_preserves_x_only_guide_field() -> None:
+    mesh = trimesh.creation.box(extents=[4.0, 3.0, 2.0]).subdivide()
+    volume = tetrahedralize(mesh)
+    guides = [
+        guide(0, [0.0, 0.0, -0.8], bend_x=0.05),
+        guide(1, [0.0, 0.0, 0.8], bend_x=0.05),
+    ]
+
+    solve_guide_deformation(volume, guides)
+
+    faces = np.sort(
+        volume.tetrahedra[:, ([1, 2, 3], [0, 3, 2], [0, 1, 3], [0, 2, 1])].reshape(
+            -1, 3
+        ),
+        axis=1,
+    )
+    _, inverse, counts = np.unique(
+        faces,
+        axis=0,
+        return_inverse=True,
+        return_counts=True,
+    )
+    owners = np.repeat(np.arange(len(volume.tetrahedra)), 4)
+    neighbours = np.asarray(
+        [owners[inverse == face] for face in np.flatnonzero(counts == 2)]
+    )
+    gradients = volume.scalar_gradients()
+    neighbour_differences = np.linalg.norm(
+        gradients[neighbours[:, 0]] - gradients[neighbours[:, 1]],
+        axis=1,
+    )
+    assert neighbour_differences.mean() < 0.05
+    normalized_gradients = gradients / np.linalg.norm(
+        gradients,
+        axis=1,
+        keepdims=True,
+    )
+    neighbour_dot_products = np.sum(
+        normalized_gradients[neighbours[:, 0]] * normalized_gradients[neighbours[:, 1]],
+        axis=1,
+    )
+    neighbour_angles = np.degrees(np.arccos(np.clip(neighbour_dot_products, -1.0, 1.0)))
+    assert neighbour_angles.mean() < 2.25
+
+    sample_points = np.asarray(
+        [
+            [x, y, z]
+            for x in (-1.0, 0.0, 1.0)
+            for z in (-0.5, 0.0, 0.5)
+            for y in (-1.0, 0.0, 1.0)
+        ]
+    )
+    normals = volume.layer_normals(sample_points).reshape(3, 3, 3, 3)
+    assert np.abs(normals[..., 1]).max() < 0.01
+    end_dot_products = np.sum(normals[:, :, 0] * normals[:, :, 2], axis=2)
+    y_variation = np.degrees(np.arccos(np.clip(end_dot_products, -1.0, 1.0)))
+    assert y_variation.max() < 1.2
+
+    edges = np.unique(
+        np.sort(
+            volume.tetrahedra[:, ([0, 0, 0, 1, 1, 2], [1, 2, 3, 2, 3, 3])].reshape(
+                -1, 2
+            ),
+            axis=1,
+        ),
+        axis=0,
+    )
+    constraints, targets = _guide_constraints(
+        volume.original_vertices,
+        edges,
+        guides,
+        np.asarray([0.0, 1.6]),
+    )
+    assert_allclose(constraints @ volume.scalar_values, targets, atol=0.03)
+    assert np.all(
+        _tetrahedron_determinants(volume.deformed_vertices, volume.tetrahedra) > 0.0
     )
 
 
