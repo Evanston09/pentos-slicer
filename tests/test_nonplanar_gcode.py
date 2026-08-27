@@ -3,7 +3,7 @@ from numpy.testing import assert_allclose
 
 from gcode_tools import iter_gcode_moves
 from models import DEFAULT_MACHINE_CONFIG
-from services.nonplanar_gcode import _ab_angles, map_gcode_to_original
+from services.nonplanar_gcode import _ab_angles, _smooth_normal, map_gcode_to_original
 from services.volumetric_deformation import TetrahedralVolume
 
 
@@ -38,6 +38,33 @@ def test_ab_angles_hold_b_near_vertical_and_track_real_tilt() -> None:
         np.arccos(np.clip(np.sum(commanded * normals, axis=1), -1.0, 1.0))
     )
     assert np.all(errors <= DEFAULT_MACHINE_CONFIG.max_normal_error_degrees + 0.01)
+
+
+def test_smooth_normal_is_time_based_and_bounded() -> None:
+    start = np.array([0.0, 0.0, 1.0])
+    target_angle = np.radians(8.0)
+    target = np.array([-np.sin(target_angle), 0.0, np.cos(target_angle)])
+
+    short = _smooth_normal(start, target, 0.001)
+    long = _smooth_normal(start, target, 0.2)
+    short_error = np.degrees(np.arccos(np.clip(np.dot(short, target), -1.0, 1.0)))
+    long_error = np.degrees(np.arccos(np.clip(np.dot(long, target), -1.0, 1.0)))
+
+    assert short_error <= 1.0 + 1e-8
+    assert long_error < short_error
+    assert np.degrees(np.arccos(np.clip(np.dot(start, short), -1.0, 1.0))) < 8.0
+
+
+def test_smooth_normal_is_segmentation_invariant_for_a_constant_target() -> None:
+    start = np.array([0.0, 0.0, 1.0])
+    target_angle = np.radians(0.5)
+    target = np.array([-np.sin(target_angle), 0.0, np.cos(target_angle)])
+
+    whole = _smooth_normal(start, target, 0.02)
+    split = _smooth_normal(start, target, 0.01)
+    split = _smooth_normal(split, target, 0.01)
+
+    assert_allclose(split, whole, atol=1e-12)
 
 
 def test_map_gcode_inverse_maps_and_compensates_extrusion() -> None:

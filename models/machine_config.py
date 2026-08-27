@@ -7,11 +7,11 @@ class MachineConfig:
     build_volume_mm: tuple[float, float, float] = (90.0, 90.0, 90.0)
     machine_plate_center_mm: tuple[float, float, float] = (113.0, 52.0, 0.0)
     rotation_center_machine_mm: tuple[float, float, float] = (112.0, 51.0, 2.0)
-    a_max_velocity_deg_s: float = 10.0
-    a_max_acceleration_deg_s2: float = 50.0
-    b_max_velocity_deg_s: float = 20.0
-    b_max_acceleration_deg_s2: float = 100.0
-    max_normal_error_degrees: float = 2.0
+    a_max_velocity_deg_s: float = 200.0
+    a_max_acceleration_deg_s2: float = 1000.0
+    b_max_velocity_deg_s: float = 200.0
+    b_max_acceleration_deg_s2: float = 1000.0
+    max_normal_error_degrees: float = 1.0
     b_degrees_min: float = -180.0
     b_degrees_max: float = 180.0
 

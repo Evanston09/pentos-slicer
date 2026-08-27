@@ -9,6 +9,39 @@ from services.volumetric_deformation import TetrahedralVolume
 MAX_EXTRUSION_MULTIPLIER = 10.0
 PLANAR_BASE_LAYERS = 2
 NONPLANAR_TRANSITION_LAYERS = 4
+ORIENTATION_SMOOTHING_TIME_SECONDS = 0.05
+MAX_FILTER_ERROR_DEGREES = 1.0
+
+
+def _slerp(start: np.ndarray, end: np.ndarray, amount: float) -> np.ndarray:
+    """Interpolate unit vectors along their shortest spherical arc."""
+    dot = float(np.clip(np.dot(start, end), -1.0, 1.0))
+    tangent = end - dot * start
+    length = float(np.linalg.norm(tangent))
+    if length < 1e-12:
+        return start.copy()
+    angle = math.atan2(length, dot)
+    return np.cos(amount * angle) * start + np.sin(amount * angle) * tangent / length
+
+
+def _smooth_normal(
+    previous: np.ndarray,
+    target: np.ndarray,
+    duration_seconds: float,
+) -> np.ndarray:
+    """Time-smooth one normal while staying within one degree of its target."""
+    previous = previous / np.linalg.norm(previous)
+    target = target / np.linalg.norm(target)
+    amount = -math.expm1(
+        -max(duration_seconds, 0.0) / ORIENTATION_SMOOTHING_TIME_SECONDS
+    )
+    filtered = _slerp(previous, target, amount)
+
+    error = math.acos(float(np.clip(np.dot(target, filtered), -1.0, 1.0)))
+    maximum = math.radians(MAX_FILTER_ERROR_DEGREES)
+    if error > maximum:
+        filtered = _slerp(target, filtered, maximum / error)
+    return filtered
 
 
 def _ab_angles(
@@ -59,6 +92,7 @@ def map_gcode_to_original(
     mapped_lines = []
     layer_index = -1
     previous_b = 0.0
+    previous_normal = np.array([0.0, 0.0, 1.0])
     last_emitted_xyz: np.ndarray | None = None
 
     for index, line in enumerate(lines):
@@ -109,9 +143,19 @@ def map_gcode_to_original(
             extrusion_multipliers = 1.0 + blend * (extrusion_multipliers - 1.0)
             normals = np.array([0.0, 0.0, 1.0]) + blend * (normals - [0.0, 0.0, 1.0])
             normals /= np.linalg.norm(normals, axis=1, keepdims=True)
+            segment_duration = (
+                60.0 * distance / move.feedrate / segment_count
+                if distance > 0.0
+                else 0.0
+            )
             angles = []
             for normal in normals:
-                angle = _ab_angles(normal, previous_b, machine_config)
+                previous_normal = _smooth_normal(
+                    previous_normal,
+                    normal,
+                    segment_duration,
+                )
+                angle = _ab_angles(previous_normal, previous_b, machine_config)
                 angles.append(angle)
                 previous_b = angle[1]
             if move.extrusion_delta > 0.0:
@@ -134,6 +178,7 @@ def map_gcode_to_original(
         except ValueError:
             # Keep out-of-volume setup and skirt moves planar for preview.
             previous_b = 0.0
+            previous_normal = np.array([0.0, 0.0, 1.0])
             mapped = np.asarray([move.end_xyz])
             angles = [(0.0, 0.0)]
             extrusion_multipliers = np.ones(1)
