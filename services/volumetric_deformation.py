@@ -13,6 +13,7 @@ from services.auto_planes import quaternion_from_z_to
 
 # Full-XYZ local-frame deformation follows S³ DeformFDM (BSD-3-Clause).
 # Tetrahedral inverse mapping follows Joshua Bird's GPL-3.0 S4 Slicer.
+# Neighboring-gradient continuity adapts S4 Slicer's neighboring-cell smoothing idea.
 
 BARYCENTRIC_TOLERANCE = 1e-6
 MAX_EXTRAPOLATION_DISTANCE = 1.0
@@ -313,15 +314,87 @@ def solve_guide_scalar_field(
         (-inverse_edges.sum(axis=1, keepdims=True), inverse_edges),
         axis=1,
     )
-    weights = np.sqrt(np.abs(np.linalg.det(edge_matrices)) / 6.0)
+    tetrahedron_volumes = np.abs(np.linalg.det(edge_matrices)) / 6.0
+    preferred_weights = np.sqrt(tetrahedron_volumes)
     rows = np.repeat(np.arange(len(volume.tetrahedra) * 3), 4)
     columns = np.tile(volume.tetrahedra, (1, 3)).ravel()
     smoothness = coo_matrix(
         (
-            (basis_gradients * weights[:, None, None]).transpose(0, 2, 1).ravel(),
+            (basis_gradients * preferred_weights[:, None, None])
+            .transpose(0, 2, 1)
+            .ravel(),
             (rows, columns),
         ),
         shape=(len(volume.tetrahedra) * 3, len(volume.original_vertices)),
+    ).tocsr()
+
+    faces = np.sort(
+        volume.tetrahedra[:, ([1, 2, 3], [0, 3, 2], [0, 1, 3], [0, 2, 1])].reshape(
+            -1, 3
+        ),
+        axis=1,
+    )
+    unique_faces, inverse, counts = np.unique(
+        faces,
+        axis=0,
+        return_inverse=True,
+        return_counts=True,
+    )
+    interior_faces = np.flatnonzero(counts == 2)
+    face_order = np.argsort(inverse)
+    face_starts = np.concatenate(([0], np.cumsum(counts[:-1])))
+    owners = np.repeat(np.arange(len(volume.tetrahedra)), 4)
+    neighbours = np.column_stack(
+        (
+            owners[face_order[face_starts[interior_faces]]],
+            owners[face_order[face_starts[interior_faces] + 1]],
+        )
+    )
+
+    shared_points = volume.original_vertices[unique_faces[interior_faces]]
+    shared_areas = 0.5 * np.linalg.norm(
+        np.cross(
+            shared_points[:, 1] - shared_points[:, 0],
+            shared_points[:, 2] - shared_points[:, 0],
+        ),
+        axis=1,
+    )
+    centers = points.mean(axis=1)
+    center_distances = np.linalg.norm(
+        centers[neighbours[:, 0]] - centers[neighbours[:, 1]],
+        axis=1,
+    )
+    # Face area / center distance is the finite-volume coupling: small faces and
+    # distant cells contribute less. Normalization keeps it comparable to the
+    # volume-weighted preferred-gradient objective at any model scale.
+    neighbour_weights = shared_areas / center_distances
+    if len(neighbour_weights):
+        neighbour_weights *= tetrahedron_volumes.sum() / neighbour_weights.sum()
+    neighbour_basis = np.concatenate(
+        (
+            basis_gradients[neighbours[:, 0]],
+            -basis_gradients[neighbours[:, 1]],
+        ),
+        axis=1,
+    )
+    neighbour_vertices = np.concatenate(
+        (
+            volume.tetrahedra[neighbours[:, 0]],
+            volume.tetrahedra[neighbours[:, 1]],
+        ),
+        axis=1,
+    )
+    continuity = coo_matrix(
+        (
+            (neighbour_basis * np.sqrt(neighbour_weights)[:, None, None])
+            .transpose(0, 2, 1)
+            .ravel(),
+            (
+                np.repeat(np.arange(len(neighbours) * 3), 8),
+                np.tile(neighbour_vertices, (1, 3)).ravel(),
+            ),
+        ),
+        shape=(len(neighbours) * 3, len(volume.original_vertices)),
     ).tocsr()
 
     guide_normals = np.asarray(
@@ -329,11 +402,20 @@ def solve_guide_scalar_field(
     )
     preferred_gradient = guide_normals.mean(axis=0)
     preferred_gradient /= np.linalg.norm(preferred_gradient)
-    smoothness_targets = (weights[:, None] * preferred_gradient).ravel()
+    smoothness_targets = (preferred_weights[:, None] * preferred_gradient).ravel()
 
     constraint_weight = 100.0
-    system = vstack((smoothness, constraints * constraint_weight), format="csr")
-    right_hand_side = np.concatenate((smoothness_targets, targets * constraint_weight))
+    system = vstack(
+        (smoothness, continuity, constraints * constraint_weight),
+        format="csr",
+    )
+    right_hand_side = np.concatenate(
+        (
+            smoothness_targets,
+            np.zeros(len(neighbours) * 3),
+            targets * constraint_weight,
+        )
+    )
     scalar_values = lsqr(
         system,
         right_hand_side,
