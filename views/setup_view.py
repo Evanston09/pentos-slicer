@@ -43,6 +43,7 @@ class SetupControls:
     auto_planes_button: viser.GuiButtonHandle
     nonplanar_folder: viser.GuiFolderHandle
     add_guide_button: viser.GuiButtonHandle
+    show_guides: viser.GuiCheckboxHandle
     show_scalar_field: viser.GuiCheckboxHandle
     debug_mode: viser.GuiCheckboxHandle
     export_button: viser.GuiButtonHandle
@@ -193,6 +194,7 @@ class SetupView:
                 "Add Guide Surface",
                 icon=viser.Icon.SQUARES_DIAGONAL,
             )
+            show_guides = self.client.gui.add_checkbox("Show Guides", True)
             show_scalar_field = self.client.gui.add_checkbox(
                 "Visualize Scalar Field",
                 False,
@@ -225,6 +227,7 @@ class SetupView:
             auto_planes_button=auto_planes_button,
             nonplanar_folder=nonplanar_folder,
             add_guide_button=add_guide_button,
+            show_guides=show_guides,
             show_scalar_field=show_scalar_field,
             debug_mode=debug_mode,
             export_button=export_button,
@@ -293,6 +296,10 @@ class SetupView:
         @controls.add_guide_button.on_click
         def _(_) -> None:
             self.controller.nonplanar.add_guide()
+
+        @controls.show_guides.on_update
+        def _(_) -> None:
+            self.guide_surface_editor.set_visible(controls.show_guides.value)
 
         @controls.show_scalar_field.on_update
         def _(_) -> None:
@@ -372,7 +379,9 @@ class SetupView:
         controls.debug_mode.visible = multiplanar
         controls.nonplanar_folder.visible = not multiplanar
         self.plane_editor.set_visible(multiplanar)
-        self.guide_surface_editor.set_visible(not multiplanar)
+        self.guide_surface_editor.set_visible(
+            not multiplanar and controls.show_guides.value
+        )
 
     def show_mesh(
         self,
