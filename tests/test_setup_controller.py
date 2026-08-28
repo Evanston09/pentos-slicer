@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import numpy as np
 from numpy.testing import assert_allclose
+import pytest
 import trimesh
 
 import controllers.setup_controller as setup_controller_module
@@ -307,6 +308,24 @@ def test_added_guides_default_to_parallel_ordered_surfaces() -> None:
     assert second.position[2] > first.position[2]
     assert_allclose(second.wxyz, first.wxyz)
     assert not any("cross" in status for status in view.statuses)
+
+
+def test_scalar_field_surface_colors_tetrahedral_boundary() -> None:
+    state = AppState(current_model=(trimesh.creation.box(), "model"))
+    controller, _, _, _ = make_controller(state)
+
+    with pytest.raises(ValueError, match="at least two guide surfaces"):
+        controller.nonplanar.scalar_field_surface()
+
+    controller.nonplanar.add_guide()
+    controller.nonplanar.add_guide()
+
+    vertices, faces, values = controller.nonplanar.scalar_field_surface()
+
+    assert len(vertices) > 0
+    assert len(faces) > 0
+    assert len(values) == len(vertices)
+    assert np.ptp(values) > 0.0
 
 
 def test_slice_dispatches_normal_and_debug_modes() -> None:

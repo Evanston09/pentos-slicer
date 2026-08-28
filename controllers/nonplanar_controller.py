@@ -10,6 +10,7 @@ from services.model_tools import transformed_model
 from services.volumetric_deformation import (
     TetrahedralVolume,
     solve_guide_deformation,
+    solve_guide_scalar_field,
     tetrahedralize,
 )
 
@@ -139,6 +140,20 @@ class NonplanarController:
         guide.wxyz = quaternion_from_z_to(mesh.face_normals[face_indices[hit_index]])
         self.view.set_guide_surface_pose(guide_id, guide.position, guide.wxyz)
         return True
+
+    def scalar_field_surface(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        model = transformed_model(self.state)
+        if model is None:
+            raise ValueError("Load a model before visualizing the scalar field")
+        if len(self.state.guide_surfaces) < 2:
+            raise ValueError(
+                "Add at least two guide surfaces to visualize the scalar field"
+            )
+
+        mesh, _ = model
+        volume = tetrahedralize(mesh)
+        values = solve_guide_scalar_field(volume, self.state.guide_surfaces)
+        return volume.original_vertices, volume.boundary_faces, values
 
     def deformed_mesh(self) -> tuple[trimesh.Trimesh, TetrahedralVolume, str]:
         model = transformed_model(self.state)

@@ -43,6 +43,7 @@ class SetupControls:
     auto_planes_button: viser.GuiButtonHandle
     nonplanar_folder: viser.GuiFolderHandle
     add_guide_button: viser.GuiButtonHandle
+    show_scalar_field: viser.GuiCheckboxHandle
     debug_mode: viser.GuiCheckboxHandle
     export_button: viser.GuiButtonHandle
     slice_button: viser.GuiButtonHandle
@@ -64,6 +65,7 @@ class SetupView:
         self.controller: SetupController
         self.controls: SetupControls | None = None
         self.model_scene: ModelScene | None = None
+        self.scalar_field_surface: viser.GlbHandle | None = None
         self.syncing_model_controls = False
         self.show_overhangs_enabled = True
         self.plane_editor = PlaneEditorView(
@@ -191,6 +193,11 @@ class SetupView:
                 "Add Guide Surface",
                 icon=viser.Icon.SQUARES_DIAGONAL,
             )
+            show_scalar_field = self.client.gui.add_checkbox(
+                "Visualize Scalar Field",
+                False,
+                disabled=state.current_model is None,
+            )
         export_button = self.client.gui.add_button(
             "Export Scene",
             icon=viser.Icon.PACKAGE_EXPORT,
@@ -218,6 +225,7 @@ class SetupView:
             auto_planes_button=auto_planes_button,
             nonplanar_folder=nonplanar_folder,
             add_guide_button=add_guide_button,
+            show_scalar_field=show_scalar_field,
             debug_mode=debug_mode,
             export_button=export_button,
             slice_button=slice_button,
@@ -286,6 +294,13 @@ class SetupView:
         def _(_) -> None:
             self.controller.nonplanar.add_guide()
 
+        @controls.show_scalar_field.on_update
+        def _(_) -> None:
+            if controls.show_scalar_field.value:
+                self._render_scalar_field()
+            else:
+                self._clear_scalar_field()
+
         @controls.debug_mode.on_update
         def _(_) -> None:
             self.controller.set_debug_mode(controls.debug_mode.value)
@@ -351,6 +366,8 @@ class SetupView:
         if controls.slicing_mode.value != mode.title():
             controls.slicing_mode.value = mode.title()
         multiplanar = mode == "multiplanar"
+        if multiplanar:
+            self._clear_scalar_field()
         controls.planes_folder.visible = multiplanar
         controls.debug_mode.visible = multiplanar
         controls.nonplanar_folder.visible = not multiplanar
@@ -426,6 +443,7 @@ class SetupView:
         ):
             handle.remove()
         self.model_scene = None
+        self._clear_scalar_field()
 
     def set_model_controls_enabled(self, enabled: bool) -> None:
         controls = self._mounted()
@@ -438,6 +456,7 @@ class SetupView:
             controls.show_overhangs,
             controls.max_auto_planes,
             controls.auto_planes_button,
+            controls.show_scalar_field,
         ):
             handle.disabled = not enabled
 
@@ -448,6 +467,9 @@ class SetupView:
         position: np.ndarray,
         wxyz: np.ndarray,
     ) -> None:
+        # Scalar-field sheets are in world coordinates and go stale when the
+        # model placement changes.
+        self._clear_scalar_field()
         scene = self._model_scene()
         scene.frame.position = position
         scene.frame.wxyz = wxyz
@@ -507,16 +529,50 @@ class SetupView:
     def set_debug_mode_value(self, enabled: bool) -> None:
         self._mounted().debug_mode.value = enabled
 
+    def _render_scalar_field(self) -> None:
+        controls = self._mounted()
+        try:
+            vertices, faces, values = self.controller.nonplanar.scalar_field_surface()
+            mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+            mesh.visual.vertex_colors = trimesh.visual.color.interpolate(values)
+            self.scalar_field_surface = self.client.scene.add_mesh_trimesh(
+                "/setup/scalar_field",
+                mesh=mesh,
+                cast_shadow=False,
+                receive_shadow=False,
+            )
+        except Exception as exc:
+            controls.show_scalar_field.value = False
+            self.set_status(f"Scalar field visualization failed: {exc}")
+            return
+        if self.model_scene is not None:
+            self.model_scene.frame.visible = False
+        controls.show_overhangs.disabled = True
+        self.set_status(f"Scalar field surface: {len(faces)} triangles")
+
+    def _clear_scalar_field(self) -> None:
+        if self.scalar_field_surface is not None:
+            self.scalar_field_surface.remove()
+            self.scalar_field_surface = None
+        if self.model_scene is not None:
+            self.model_scene.frame.visible = True
+        if self.controls is not None:
+            self.controls.show_overhangs.disabled = self.model_scene is None
+            self.controls.show_scalar_field.value = False
+
     def replace_guide_surfaces(
         self,
         guides: list[GuideSurfaceSnapshot],
     ) -> None:
+        self._clear_scalar_field()
         self.guide_surface_editor.replace_guides(guides)
 
     def add_guide_surface(self, guide: GuideSurfaceSnapshot) -> None:
+        self._clear_scalar_field()
         self.guide_surface_editor.add_guide(guide)
 
     def remove_guide_surface(self, guide_id: int) -> None:
+        self._clear_scalar_field()
         self._disarm_snap(("guide", guide_id))
         self.guide_surface_editor.remove_guide(guide_id)
 
@@ -526,6 +582,7 @@ class SetupView:
         position: np.ndarray,
         wxyz: np.ndarray,
     ) -> None:
+        self._clear_scalar_field()
         self.guide_surface_editor.set_guide_pose(guide_id, position, wxyz)
 
     def set_guide_surface_mesh(
@@ -534,6 +591,7 @@ class SetupView:
         vertices: np.ndarray,
         faces: np.ndarray,
     ) -> None:
+        self._clear_scalar_field()
         self.guide_surface_editor.set_guide_mesh(guide_id, vertices, faces)
 
     def _sync_model_controls(
