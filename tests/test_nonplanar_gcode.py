@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import numpy as np
 from numpy.testing import assert_allclose
 
@@ -144,7 +146,11 @@ def test_smooth_normals_is_segmentation_invariant() -> None:
 
 
 def test_map_gcode_uses_source_feedrate_for_smoothing() -> None:
-    offset = np.asarray(DEFAULT_MACHINE_CONFIG.machine_offset)
+    machine_config = replace(
+        DEFAULT_MACHINE_CONFIG,
+        max_normal_error_degrees=2.0,
+    )
+    offset = np.asarray(machine_config.machine_offset)
     start = offset + [0.0, 0.1, 0.1]
     end = offset + [0.5, 0.1, 0.1]
     layers = ";LAYER_CHANGE\n" * 6
@@ -156,9 +162,7 @@ def test_map_gcode_uses_source_feedrate_for_smoothing() -> None:
             f"{layers}"
             f"G1 X{end[0]} Y{end[1]} Z{end[2]} E0.5 F{feedrate}\n"
         )
-        mapped = map_gcode_to_original(
-            text, _SpikedNormalVolume(), DEFAULT_MACHINE_CONFIG, 0.1
-        )
+        mapped = map_gcode_to_original(text, _SpikedNormalVolume(), machine_config, 0.1)
         return float(_mapped_ab_moves(mapped)[-3].end_ab[0])
 
     assert center_angle(60.0) > center_angle(6000.0) + 0.05
