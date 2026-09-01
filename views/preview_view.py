@@ -33,6 +33,7 @@ class PreviewView:
         self.controls: PreviewControls | None = None
         self.travel_handles: list[viser.LineSegmentsHandle] = []
         self.extrusion_handles: list[viser.LineSegmentsHandle] = []
+        self.rotary_plot: viser.GuiUplotHandle | None = None
 
     def bind_controller(self, controller: PreviewController) -> None:
         self.controller = controller
@@ -118,6 +119,27 @@ class PreviewView:
         line_width = controls.line_width.value
         travel_visible = controls.show_travel.value
 
+        if len(preview.motion_time_seconds):
+            self.rotary_plot = self.client.gui.add_uplot(
+                data=(
+                    preview.motion_time_seconds,
+                    preview.a_degrees,
+                    preview.b_degrees,
+                ),
+                series=(
+                    {},
+                    {"label": "A", "stroke": "#f58214", "width": 2.0},
+                    {"label": "B", "stroke": "#2f99ee", "width": 2.0},
+                ),
+                title="A/B movement (click legend to toggle)",
+                scales={"x": {"time": False}},
+                axes=(
+                    {"label": "Nominal motion time (s)"},
+                    {"label": "Commanded angle (degrees)"},
+                ),
+                height=260,
+            )
+
         if len(preview.setup):
             self.travel_handles.append(
                 self.client.scene.add_line_segments(
@@ -156,6 +178,9 @@ class PreviewView:
             return
 
         controls = self.controls
+        if self.rotary_plot is not None:
+            self.rotary_plot.remove()
+            self.rotary_plot = None
         for handle in (
             *self.extrusion_handles,
             *self.travel_handles,
