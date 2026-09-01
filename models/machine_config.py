@@ -11,7 +11,7 @@ class MachineConfig:
     a_max_acceleration_deg_s2: float = 50.0
     b_max_velocity_deg_s: float = 20.0
     b_max_acceleration_deg_s2: float = 100.0
-    max_normal_error_degrees: float = 1.0
+    max_normal_error_degrees: float = 2.0
     b_degrees_min: float = -180.0
     b_degrees_max: float = 180.0
 
