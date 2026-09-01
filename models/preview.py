@@ -14,3 +14,6 @@ class GcodePreviewPart:
 class GcodePreview:
     setup: np.ndarray
     parts: list[GcodePreviewPart]
+    motion_time_seconds: np.ndarray
+    a_degrees: np.ndarray
+    b_degrees: np.ndarray

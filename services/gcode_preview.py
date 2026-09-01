@@ -41,6 +41,11 @@ def parse_gcode_preview(
     part_travel_segments: list[list[np.ndarray]] = []
     part_extrusion_segments: list[list[np.ndarray]] = []
     parts: list[GcodePreviewPart] = []
+    motion_time_seconds = 0.0
+    motion_times = [0.0]
+    a_degrees = [0.0]
+    b_degrees = [0.0]
+    has_rotary_commands = False
 
     lines = text.splitlines()
     moves_by_index = {move.index: move for move in iter_gcode_moves(lines)}
@@ -75,6 +80,25 @@ def parse_gcode_preview(
         if move is None:
             continue
 
+        if "A" in move.parsed.args or "B" in move.parsed.args:
+            has_rotary_commands = True
+        duration = 0.0
+        if (
+            move.start_xyz is not None
+            and move.end_xyz is not None
+            and move.feedrate is not None
+            and move.feedrate > 0.0
+        ):
+            distance = float(np.linalg.norm(move.end_xyz - move.start_xyz))
+            duration = (distance / move.feedrate) * 60.0
+        motion_time_seconds += duration
+        if duration > 0.0 or not np.array_equal(
+            move.end_ab, [a_degrees[-1], b_degrees[-1]]
+        ):
+            motion_times.append(motion_time_seconds)
+            a_degrees.append(float(move.end_ab[0]))
+            b_degrees.append(float(move.end_ab[1]))
+
         if move.has_xyz and move.start_xyz is not None and move.end_xyz is not None:
             start = transform_preview_point(
                 move.start_xyz, *move.start_ab, machine_config
@@ -98,4 +122,14 @@ def parse_gcode_preview(
                 color=PART_COLORS[part_index % len(PART_COLORS)],
             )
         )
-    return GcodePreview(setup=np.asarray(setup_segments), parts=parts)
+    if not has_rotary_commands:
+        motion_times = []
+        a_degrees = []
+        b_degrees = []
+    return GcodePreview(
+        setup=np.asarray(setup_segments),
+        parts=parts,
+        motion_time_seconds=np.asarray(motion_times),
+        a_degrees=np.asarray(a_degrees),
+        b_degrees=np.asarray(b_degrees),
+    )
