@@ -36,7 +36,7 @@ def load_machine_config(content: bytes) -> MachineConfig:
     if not isinstance(name, str) or not name.strip() or len(name) > 100:
         raise ValueError("Machine name must be between 1 and 100 characters")
 
-    max_normal_error_degrees = _positive_number(data, "max_normal_error_degrees", 2.0)
+    max_normal_error_degrees = _positive_number(data, "max_normal_error_degrees", 1.0)
     if max_normal_error_degrees > 90.0:
         raise ValueError("max_normal_error_degrees must not exceed 90")
     b_degrees_min = _number(data, "b_degrees_min", -180.0)
