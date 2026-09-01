@@ -1,25 +1,46 @@
 import math
+from dataclasses import dataclass
+from typing import Protocol
 
 import numpy as np
-from gcode_tools import GcodeCommand, iter_gcode_moves, parse_gcode_arg
+
+from gcode_tools import GcodeCommand, GcodeMove, iter_gcode_moves, parse_gcode_arg
 from machine import rotation_matrix
 from models import MachineConfig
-from services.volumetric_deformation import TetrahedralVolume
 
 MAX_EXTRUSION_MULTIPLIER = 10.0
 PLANAR_BASE_LAYERS = 2
 NONPLANAR_TRANSITION_LAYERS = 4
+ORIENTATION_SMOOTHING_TIME_SECONDS = 0.05
+
+
+@dataclass
+class _MappedMoveProperties:
+    original_points: np.ndarray
+    extrusion_multipliers: np.ndarray
+    normals: np.ndarray
+    segment_durations: np.ndarray
+    angles: np.ndarray
+
+
+class _InverseMappingVolume(Protocol):
+    def inverse_map_properties(
+        self, points: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]: ...
 
 
 def _ab_angles(
     normal: np.ndarray,
     previous_b: float,
     machine_config: MachineConfig,
+    max_error_degrees: float | None = None,
 ) -> tuple[float, float]:
     """Choose the nearest legal pose of a desired normal on a point in model within the allowed normal error."""
     normal = normal / np.linalg.norm(normal)
     # A unit normal tilted by θ from vertical has horizontal magnitude sin(θ).
-    tolerance = np.sin(np.radians(machine_config.max_normal_error_degrees))
+    if max_error_degrees is None:
+        max_error_degrees = machine_config.max_normal_error_degrees
+    tolerance = np.sin(np.radians(max_error_degrees))
     target_b = (np.degrees(np.arctan2(-normal[1], -normal[0])) + 180.0) % 360.0 - 180.0
     horizontal = np.hypot(normal[0], normal[1])
     width = (
@@ -44,9 +65,164 @@ def _ab_angles(
     return float(np.degrees(np.arctan2(horizontal, normal[2]))), b_degrees
 
 
+def _slerp(start: np.ndarray, end: np.ndarray, amount: float) -> np.ndarray:
+    """Interpolate unit vectors along their shortest spherical arc."""
+    dot = float(np.clip(np.dot(start, end), -1.0, 1.0))
+    # Project onto the tangent plane so interpolation follows the unit sphere.
+    # Parallel vectors need no change; opposite vectors have no unique shortest arc,
+    # so keep the current direction rather than choosing an arbitrary rotation axis.
+    tangent = end - dot * start
+    length = float(np.linalg.norm(tangent))
+    if length < 1e-12:
+        return start.copy()
+    angle = math.atan2(length, dot)
+    return np.cos(amount * angle) * start + np.sin(amount * angle) * tangent / length
+
+
+def _smooth_normals(
+    normals: np.ndarray,
+    segment_durations: np.ndarray,
+    max_error_degrees: float,
+) -> np.ndarray:
+    """Time-domain smooth a path's normals within its orientation-error limit."""
+    normals = normals / np.linalg.norm(normals, axis=1, keepdims=True)
+    if len(normals) < 2:
+        return normals.copy()
+
+    amounts = -np.expm1(
+        -np.maximum(segment_durations, 0.0) / ORIENTATION_SMOOTHING_TIME_SECONDS
+    )
+    forward = normals.copy()
+    for index in range(1, len(normals)):
+        forward[index] = _slerp(forward[index - 1], normals[index], amounts[index])
+    backward = normals.copy()
+    for index in range(len(normals) - 2, -1, -1):
+        backward[index] = _slerp(
+            backward[index + 1], normals[index], amounts[index + 1]
+        )
+    smoothed = np.asarray(
+        [_slerp(before, after, 0.5) for before, after in zip(forward, backward)]
+    )
+
+    maximum = np.radians(max_error_degrees)
+    for index, (target, candidate) in enumerate(zip(normals, smoothed)):
+        error = math.acos(float(np.clip(np.dot(target, candidate), -1.0, 1.0)))
+        if error > maximum:
+            smoothed[index] = _slerp(target, candidate, maximum / error)
+    return smoothed
+
+
+def _commanded_normal(angle: np.ndarray) -> np.ndarray:
+    return rotation_matrix(*angle).T @ np.array([0.0, 0.0, 1.0])
+
+
+def _prepare_mapped_moves(
+    lines: list[str],
+    moves: dict[int, GcodeMove],
+    volume: _InverseMappingVolume,
+    machine_config: MachineConfig,
+    max_segment_length: float,
+) -> dict[int, _MappedMoveProperties]:
+    """Inverse-map moves and smooth normals within continuous motion paths."""
+    prepared: dict[int, _MappedMoveProperties] = {}
+    groups: list[tuple[list[tuple[int, int]], bool]] = []
+    current_group: list[tuple[int, int]] | None = None
+    reset_b_before_group = False
+    layer_index = -1
+
+    for index, line in enumerate(lines):
+        parsed = GcodeCommand.parse(line)
+        if parsed.comment == "LAYER_CHANGE":
+            layer_index += 1
+            current_group = None
+
+        move = moves.get(index)
+        if layer_index < PLANAR_BASE_LAYERS:
+            continue
+        if move is None:
+            if parsed.command in {"G90", "G91"} or (
+                parsed.command == "G92" and any(axis in parsed.args for axis in "XYZAB")
+            ):
+                current_group = None
+            continue
+        if (
+            not move.is_absolute_xyz
+            or not move.has_xyz
+            or move.start_xyz is None
+            or move.end_xyz is None
+        ):
+            if move.has_xyz:
+                current_group = None
+            continue
+
+        distance = float(np.linalg.norm(move.end_xyz - move.start_xyz))
+        if distance > 0.0 and (move.feedrate is None or move.feedrate <= 0.0):
+            raise ValueError("Mapped G-code move has no positive feedrate")
+        segment_count = max(1, math.ceil(distance / max_segment_length))
+        points = move.start_xyz + (
+            np.arange(1, segment_count + 1)[:, None]
+            / segment_count
+            * (move.end_xyz - move.start_xyz)
+        )
+        try:
+            local_points = points - machine_config.machine_offset
+            original_points, extrusion_multipliers, normals = (
+                volume.inverse_map_properties(local_points)
+            )
+        except ValueError:
+            current_group = None
+            reset_b_before_group = True
+            continue
+
+        blend = min(
+            1.0,
+            (layer_index - PLANAR_BASE_LAYERS + 1) / NONPLANAR_TRANSITION_LAYERS,
+        )
+        original_points = local_points + blend * (original_points - local_points)
+        extrusion_multipliers = 1.0 + blend * (extrusion_multipliers - 1.0)
+        normals = np.array([0.0, 0.0, 1.0]) + blend * (normals - [0.0, 0.0, 1.0])
+        normals /= np.linalg.norm(normals, axis=1, keepdims=True)
+        duration = 60.0 * distance / move.feedrate if distance > 0.0 else 0.0
+        prepared[index] = _MappedMoveProperties(
+            original_points,
+            extrusion_multipliers,
+            normals,
+            np.full(segment_count, duration / segment_count),
+            np.empty((segment_count, 2)),
+        )
+
+        if current_group is None:
+            current_group = []
+            groups.append((current_group, reset_b_before_group))
+            reset_b_before_group = False
+        current_group.extend((index, segment) for segment in range(segment_count))
+
+    previous_b = 0.0
+    mapping_error = machine_config.max_normal_error_degrees / 2.0
+    for group, reset_b in groups:
+        if reset_b:
+            previous_b = 0.0
+        source_normals = np.asarray(
+            [prepared[index].normals[segment] for index, segment in group]
+        )
+        durations = np.asarray(
+            [prepared[index].segment_durations[segment] for index, segment in group]
+        )
+        smoothed_normals = _smooth_normals(source_normals, durations, mapping_error)
+        angles = []
+        for normal in smoothed_normals:
+            angle = _ab_angles(normal, previous_b, machine_config, mapping_error)
+            angles.append(angle)
+            previous_b = angle[1]
+        for (index, segment), angle in zip(group, angles):
+            prepared[index].angles[segment] = angle
+
+    return prepared
+
+
 def map_gcode_to_original(
     text: str,
-    volume: TetrahedralVolume,
+    volume: _InverseMappingVolume,
     machine_config: MachineConfig,
     max_segment_length: float = 0.5,
 ) -> str:
@@ -56,9 +232,15 @@ def map_gcode_to_original(
 
     lines = text.splitlines(keepends=True)
     moves = {move.index: move for move in iter_gcode_moves(lines)}
+    prepared_moves = _prepare_mapped_moves(
+        lines,
+        moves,
+        volume,
+        machine_config,
+        max_segment_length,
+    )
     mapped_lines = []
     layer_index = -1
-    previous_b = 0.0
     last_emitted_xyz: np.ndarray | None = None
 
     for index, line in enumerate(lines):
@@ -76,13 +258,11 @@ def map_gcode_to_original(
             or move.end_xyz is None
         ):
             mapped_lines.append(line)
-            if move is not None and move.end_xyz is not None:
+            if move is not None and move.has_xyz and move.end_xyz is not None:
                 last_emitted_xyz = move.end_xyz
             continue
 
         distance = float(np.linalg.norm(move.end_xyz - move.start_xyz))
-        if distance > 0.0 and move.feedrate is None:
-            raise ValueError("Mapped G-code move has no feedrate")
         if move.extrusion_delta > 0.0 and move.is_absolute_extrusion:
             raise ValueError(
                 "Nonplanar extrusion compensation requires relative extrusion"
@@ -90,30 +270,12 @@ def map_gcode_to_original(
 
         stripped = line.rstrip("\r\n")
         ending = line[len(stripped) :]
-        segment_count = max(1, math.ceil(distance / max_segment_length))
-        points = move.start_xyz + (
-            np.arange(1, segment_count + 1)[:, None]
-            / segment_count
-            * (move.end_xyz - move.start_xyz)
-        )
-        try:
-            local_points = points - machine_config.machine_offset
-            original_points, extrusion_multipliers, normals = (
-                volume.inverse_map_properties(local_points)
-            )
-            blend = min(
-                1.0,
-                (layer_index - PLANAR_BASE_LAYERS + 1) / NONPLANAR_TRANSITION_LAYERS,
-            )
-            original_points = local_points + blend * (original_points - local_points)
-            extrusion_multipliers = 1.0 + blend * (extrusion_multipliers - 1.0)
-            normals = np.array([0.0, 0.0, 1.0]) + blend * (normals - [0.0, 0.0, 1.0])
-            normals /= np.linalg.norm(normals, axis=1, keepdims=True)
-            angles = []
-            for normal in normals:
-                angle = _ab_angles(normal, previous_b, machine_config)
-                angles.append(angle)
-                previous_b = angle[1]
+        properties = prepared_moves.get(index)
+        if properties is not None:
+            original_points = properties.original_points
+            extrusion_multipliers = properties.extrusion_multipliers
+            angles = properties.angles
+            segment_count = len(original_points)
             if move.extrusion_delta > 0.0:
                 extrusion_multipliers = np.minimum(
                     extrusion_multipliers,
@@ -131,9 +293,8 @@ def map_gcode_to_original(
                     for point, (a_degrees, b_degrees) in zip(original_points, angles)
                 ]
             )
-        except ValueError:
+        else:
             # Keep out-of-volume setup and skirt moves planar for preview.
-            previous_b = 0.0
             mapped = np.asarray([move.end_xyz])
             angles = [(0.0, 0.0)]
             extrusion_multipliers = np.ones(1)
