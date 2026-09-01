@@ -28,3 +28,23 @@ def test_preview_uses_each_endpoint_ab_pose() -> None:
     preview = parse_gcode_preview(text, DEFAULT_MACHINE_CONFIG)
 
     assert_allclose(preview.parts[0].extrusion[0], [start, end])
+
+
+def test_preview_tracks_ab_over_nominal_motion_time() -> None:
+    preview = parse_gcode_preview(
+        "G90\nG1 X0 Y0 Z0 F600\nG1 X10 Y0 Z0 A10 B20\nG1 X20 Y0 Z0\n",
+        DEFAULT_MACHINE_CONFIG,
+    )
+
+    assert_allclose(preview.motion_time_seconds, [0.0, 1.0, 2.0])
+    assert_allclose(preview.a_degrees, [0.0, 10.0, 10.0])
+    assert_allclose(preview.b_degrees, [0.0, 20.0, 20.0])
+
+
+def test_preview_omits_ab_trace_without_rotary_commands() -> None:
+    preview = parse_gcode_preview(
+        "G90\nG1 X0 Y0 Z0 F600\nG1 X10 Y0 Z0\n",
+        DEFAULT_MACHINE_CONFIG,
+    )
+
+    assert len(preview.motion_time_seconds) == 0
