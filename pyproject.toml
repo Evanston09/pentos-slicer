@@ -18,7 +18,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "pillow>=12.2.0",
     "pre-commit>=4.6.0",
     "pytest>=8.4.2",
     "ruff>=0.15.18",
@@ -30,9 +29,3 @@ pythonpath = ["."]
 
 [tool.basedpyright]
 typeCheckingMode = "standard"
-
-[tool.ruff.lint.per-file-ignores]
-# Path bootstrap must run before imports when modules are used as scripts.
-"visualizations/*.py" = ["E402"]
-"visualizations/blender/*.py" = ["E402"]
-"tests/test_visualization_pipeline.py" = ["E402"]
