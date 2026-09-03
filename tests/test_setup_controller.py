@@ -18,6 +18,7 @@ from services.project_io import save_scene
 class FakeSetupView:
     def __init__(self) -> None:
         self.statuses: list[str] = []
+        self.slice_progress: list[tuple[float | None, str | None]] = []
         self.planes = []
         self.mesh = None
         self.removed_plane_ids: list[int] = []
@@ -38,6 +39,11 @@ class FakeSetupView:
 
     def set_status(self, message: str) -> None:
         self.statuses.append(message)
+
+    def set_slice_progress(self, progress, message=None) -> None:
+        self.slice_progress.append((progress, message))
+        if message is not None:
+            self.statuses.append(message)
 
     def show_machine_config(self, config) -> None:
         self.machine_config = config
@@ -103,16 +109,18 @@ class FakeSlicer:
         self.calls = []
         self.error: Exception | None = None
 
-    def slice(self, mesh, planes, source_name) -> Path:
+    def slice(self, mesh, planes, source_name, *, progress) -> Path:
         if self.error is not None:
             raise self.error
         self.calls.append(("slice", mesh, list(planes), source_name))
+        progress(0.5, "Slicing chunk 1 of 1...")
         return Path("output/model.gcode")
 
-    def debug_transition_check(self, mesh, planes, source_name) -> Path:
+    def debug_transition_check(self, mesh, planes, source_name, *, progress) -> Path:
         if self.error is not None:
             raise self.error
         self.calls.append(("debug", mesh, list(planes), source_name))
+        progress(0.5, "Slicing chunk 1 of 1...")
         return Path("output/model_debug.gcode")
 
 
@@ -330,7 +338,7 @@ def test_scalar_field_surface_colors_tetrahedral_boundary() -> None:
 
 def test_slice_dispatches_normal_and_debug_modes() -> None:
     state = AppState(current_model=(trimesh.creation.box(), "model"))
-    controller, _, slicer, navigations = make_controller(state)
+    controller, view, slicer, navigations = make_controller(state)
 
     controller.slice_model()
     state.debug_mode = True
@@ -339,12 +347,14 @@ def test_slice_dispatches_normal_and_debug_modes() -> None:
     assert [call[0] for call in slicer.calls] == ["slice", "debug"]
     assert navigations == ["preview", "preview"]
     assert state.gcode_path == Path("output/model_debug.gcode")
+    assert view.slice_progress[-1] == (None, None)
+    assert (1.0, "Opening preview...") in view.slice_progress
 
 
 def test_nonplanar_slice_uses_deformed_mesh(tmp_path) -> None:
     class NonplanarFakeSlicer(FakeSlicer):
-        def slice(self, mesh, planes, source_name) -> Path:
-            super().slice(mesh, planes, source_name)
+        def slice(self, mesh, planes, source_name, *, progress) -> Path:
+            super().slice(mesh, planes, source_name, progress=progress)
             path = tmp_path / f"{source_name}.gcode"
             path.write_text("G90\n")
             return path
@@ -368,6 +378,9 @@ def test_nonplanar_slice_uses_deformed_mesh(tmp_path) -> None:
     assert view.slicing_mode == "nonplanar"
     assert controller.state.gcode_path == tmp_path / "model_mapped.gcode"
     assert navigations == ["preview"]
+    assert (0.05, "Deforming model...") in view.slice_progress
+    assert (0.85, "Inverse-mapping G-code...") in view.slice_progress
+    assert view.slice_progress[-1] == (None, None)
 
 
 def test_slice_failure_does_not_navigate() -> None:
@@ -380,6 +393,7 @@ def test_slice_failure_does_not_navigate() -> None:
     assert navigations == []
     assert view.statuses[-1] == "Failed to slice: slicer failed"
     assert view.slice_enabled == [False, True]
+    assert view.slice_progress[-1] == (None, None)
 
 
 def test_slice_reports_busy_server() -> None:
@@ -397,6 +411,7 @@ def test_slice_reports_busy_server() -> None:
     assert navigations == []
     assert view.statuses[-1] == "Server is busy slicing other models"
     assert view.slice_enabled == [False, True]
+    assert view.slice_progress[-1] == (None, None)
 
 
 def test_loading_nonplanar_project_restores_guides_and_mode() -> None:

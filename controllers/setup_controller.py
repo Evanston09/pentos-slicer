@@ -39,6 +39,12 @@ class SetupViewPort(NonplanarViewPort, Protocol):
 
     def set_status(self, message: str) -> None: ...
 
+    def set_slice_progress(
+        self,
+        progress: float | None,
+        message: str | None = None,
+    ) -> None: ...
+
     def show_machine_config(self, config: MachineConfig) -> None: ...
 
     def set_slice_enabled(self, enabled: bool) -> None: ...
@@ -333,6 +339,7 @@ class SetupController:
 
         mesh, source_name = model
         self.view.set_slice_enabled(False)
+        self.view.set_slice_progress(0.0, "Preparing slice...")
         try:
             with self.workspace.active_job():
                 if not self.slicing_slots.acquire(blocking=False):
@@ -340,14 +347,22 @@ class SetupController:
                     return
                 try:
                     if self.state.slicing_mode == "nonplanar":
-                        self.view.set_status(
-                            "Deforming, slicing, and inverse-mapping model..."
-                        )
+                        self.view.set_slice_progress(0.05, "Deforming model...")
                         deformed, volume, source_name = self.nonplanar.deformed_mesh()
                         planar_path = self.slicer.slice(
                             deformed,
                             [],
                             f"{source_name}_deformed",
+                            progress=lambda value, message: (
+                                self.view.set_slice_progress(
+                                    0.2 + 0.6 * value,
+                                    message,
+                                )
+                            ),
+                        )
+                        self.view.set_slice_progress(
+                            0.85,
+                            "Inverse-mapping G-code...",
                         )
                         output_path = planar_path.with_name(
                             f"{source_name}_mapped.gcode"
@@ -360,23 +375,21 @@ class SetupController:
                             )
                         )
                     else:
-                        self.view.set_status(
-                            "Generating debug transition check..."
-                            if self.state.debug_mode
-                            else "Slicing..."
-                        )
                         if self.state.debug_mode:
                             output_path = self.slicer.debug_transition_check(
                                 mesh,
                                 self.state.plane_snapshots,
                                 source_name,
+                                progress=self.view.set_slice_progress,
                             )
                         else:
                             output_path = self.slicer.slice(
                                 mesh,
                                 self.state.plane_snapshots,
                                 source_name,
+                                progress=self.view.set_slice_progress,
                             )
+                    self.view.set_slice_progress(1.0, "Opening preview...")
                 finally:
                     self.slicing_slots.release()
         except Exception as exc:
@@ -385,6 +398,7 @@ class SetupController:
             return
         finally:
             self.view.set_slice_enabled(True)
+            self.view.set_slice_progress(None)
 
         self.state.gcode_path = output_path
         self.show_preview()

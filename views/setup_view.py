@@ -18,6 +18,8 @@ from views.plane_editor_view import PlaneEditorView
 from views.theming import OVERHANG_RED, PENTOS_BLUE, add_build_plate_scene
 
 if TYPE_CHECKING:
+    from viser._gui_handles import GuiProgressBarHandle
+
     from controllers.setup_controller import SetupController
 
 MODEL_GIZMO_LINE_WIDTH = 5.0
@@ -30,6 +32,7 @@ class SetupControls:
     machine_name: viser.GuiTextHandle
     upload: viser.GuiUploadButtonHandle
     status: viser.GuiTextHandle
+    slice_progress: GuiProgressBarHandle
     model_folder: viser.GuiFolderHandle
     model_x_position: viser.GuiNumberHandle[float]
     model_y_position: viser.GuiNumberHandle[float]
@@ -117,6 +120,11 @@ class SetupView:
             "Status",
             "No model loaded",
             disabled=True,
+        )
+        slice_progress = self.client.gui.add_progress_bar(
+            0.0,
+            visible=False,
+            animated=True,
         )
 
         model_folder = self.client.gui.add_folder(
@@ -214,6 +222,7 @@ class SetupView:
             machine_name=machine_name,
             upload=upload,
             status=status,
+            slice_progress=slice_progress,
             model_folder=model_folder,
             model_x_position=model_x_position,
             model_y_position=model_y_position,
@@ -350,6 +359,7 @@ class SetupView:
             controls.planes_folder,
             controls.model_folder,
             controls.slicing_mode,
+            controls.slice_progress,
             controls.status,
             controls.upload,
             controls.machine_folder,
@@ -360,6 +370,22 @@ class SetupView:
 
     def set_status(self, message: str) -> None:
         self._mounted().status.value = message
+
+    def set_slice_progress(
+        self,
+        progress: float | None,
+        message: str | None = None,
+    ) -> None:
+        controls = self._mounted()
+        if progress is None:
+            controls.slice_progress.visible = False
+            controls.slice_progress.value = 0.0
+            return
+
+        controls.slice_progress.value = max(0.0, min(100.0, progress * 100.0))
+        controls.slice_progress.visible = True
+        if message is not None:
+            controls.status.value = message
 
     def show_machine_config(self, config: MachineConfig) -> None:
         self._mounted().machine_name.value = config.name

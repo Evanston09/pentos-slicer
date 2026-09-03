@@ -1,4 +1,5 @@
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -16,6 +17,7 @@ from services.multiplanar_gcode import (
 
 CONTINUATION_RESTART_EXTRA_MM = 0.25
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "pentos_config.ini"
+SliceProgress = Callable[[float, str], None]
 
 
 class SlicePlane(Protocol):
@@ -98,54 +100,80 @@ class Slicer:
         mesh: trimesh.Trimesh,
         planes: list[SlicePlane],
         source_name: str = "model",
+        *,
+        progress: SliceProgress,
     ) -> Path:
+        progress(0.05, "Preparing model...")
         chunks = self.export_stl_chunks(mesh, planes, source_name)
         if not chunks:
             raise ValueError("No chunks were generated")
 
-        gcode_paths = self.run_prusa_slicer(chunks)
+        chunk_label = "chunk" if len(chunks) == 1 else "chunks"
+        progress(0.15, f"Prepared {len(chunks)} {chunk_label}")
+        gcode_paths = self.run_prusa_slicer(chunks, progress=progress)
+
+        progress(0.9, "Combining G-code...")
         output_path = self.out_dir / f"{source_name}.gcode"
         if len(gcode_paths) == 1:
             lines = gcode_paths[0].read_text().splitlines(keepends=True)
             output_path.write_text(
                 "".join(translate_gcode(lines, self.machine_config.machine_offset))
             )
+            progress(1.0, "G-code ready")
             return output_path
-        return merge_gcode_files(
+        result = merge_gcode_files(
             gcode_paths,
             chunks,
             output_path,
             self.machine_config.machine_offset,
         )
+        progress(1.0, "G-code ready")
+        return result
 
     def debug_transition_check(
         self,
         mesh: trimesh.Trimesh,
         planes: list[SlicePlane],
         source_name: str = "model",
+        *,
+        progress: SliceProgress,
     ) -> Path:
+        progress(0.05, "Preparing model...")
         chunks = self.export_stl_chunks(mesh, planes, source_name)
         if not chunks:
             raise ValueError("No chunks were generated")
 
-        gcode_paths = self.run_prusa_slicer(chunks)
+        chunk_label = "chunk" if len(chunks) == 1 else "chunks"
+        progress(0.15, f"Prepared {len(chunks)} {chunk_label}")
+        gcode_paths = self.run_prusa_slicer(chunks, progress=progress)
+
+        progress(0.9, "Generating transition check...")
         output_path = self.out_dir / f"{source_name}_debug.gcode"
-        return generate_debug_transition_check(
+        result = generate_debug_transition_check(
             gcode_paths,
             chunks,
             output_path,
             self.machine_config.machine_offset,
         )
+        progress(1.0, "G-code ready")
+        return result
 
     def run_prusa_slicer(
         self,
         chunks: list[Chunk],
+        *,
+        progress: SliceProgress,
         config_path: Path = DEFAULT_CONFIG_PATH,
         slicer_cmd: str = "prusa-slicer",
     ) -> list[Path]:
         gcode_paths = []
+        total = len(chunks)
 
         for index, chunk in enumerate(chunks):
+            progress(
+                0.15 + 0.7 * index / total,
+                f"Slicing chunk {index + 1} of {total}...",
+            )
             gcode_path = chunk.path.with_suffix(".gcode")
             command = [
                 slicer_cmd,
