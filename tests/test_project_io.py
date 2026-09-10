@@ -4,6 +4,8 @@ from pathlib import Path
 import zipfile
 
 import numpy as np
+from numpy.testing import assert_allclose
+import pytest
 import trimesh
 
 from models import AppState, GuideSurfaceSnapshot, PlaneSnapshot
@@ -27,8 +29,8 @@ def test_scene_round_trip_preserves_nonplanar_project() -> None:
                 position=np.array([4.0, 5.0, 6.0]),
                 wxyz=np.array([1.0, 0.0, 0.0, 0.0]),
                 guide_id=9,
-                bend_x=0.01,
-                bend_y=-0.02,
+                size_mm=np.array([80.0, 90.0]),
+                heights_mm=np.arange(16, dtype=float).reshape(4, 4),
             )
         ],
         slicing_mode="nonplanar",
@@ -39,7 +41,7 @@ def test_scene_round_trip_preserves_nonplanar_project() -> None:
     with zipfile.ZipFile(io.BytesIO(content)) as zf:
         manifest = json.loads(zf.read("manifest.json"))
 
-    assert manifest["version"] == 2
+    assert manifest["version"] == 3
     assert "plane_id" not in manifest["plane_snapshots"][0]
     assert "guide_id" not in manifest["guide_surfaces"][0]
 
@@ -52,22 +54,52 @@ def test_scene_round_trip_preserves_nonplanar_project() -> None:
     assert loaded.slicing_mode == "nonplanar"
     assert loaded.plane_snapshots[0].plane_id == 0
     assert loaded.guide_surfaces[0].guide_id == 0
-    assert loaded.guide_surfaces[0].bend_x == 0.01
-    assert loaded.guide_surfaces[0].bend_y == -0.02
+    assert_allclose(loaded.guide_surfaces[0].size_mm, [80.0, 90.0])
+    assert_allclose(loaded.guide_surfaces[0].heights_mm, np.arange(16).reshape(4, 4))
 
 
-def test_sample_scenes_load() -> None:
-    loaded = load_scene(Path("samples/Tube.pentos").read_bytes())
+@pytest.mark.parametrize("version", [1, 2])
+def test_older_project_versions_are_rejected(version: int) -> None:
+    content = save_scene(AppState(current_model=(trimesh.creation.box(), "box")))
+    source = zipfile.ZipFile(io.BytesIO(content))
+    files = {name: source.read(name) for name in source.namelist()}
+    manifest = json.loads(files["manifest.json"])
+    manifest["version"] = version
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        for name, data in files.items():
+            archive.writestr(
+                name,
+                json.dumps(manifest) if name == "manifest.json" else data,
+            )
 
-    assert loaded.current_model is not None
-    assert loaded.current_model[1] == "Tube"
-    assert len(loaded.plane_snapshots) == 1
-    assert loaded.guide_surfaces == []
-    assert loaded.slicing_mode == "multiplanar"
+    with pytest.raises(ValueError, match="version 3 is required"):
+        load_scene(output.getvalue())
 
-    loaded = load_scene(Path("samples/arched_bridge.pentos").read_bytes())
 
-    assert loaded.current_model is not None
-    assert loaded.current_model[1] == "arched_bridge"
-    assert len(loaded.guide_surfaces) == 3
-    assert loaded.slicing_mode == "nonplanar"
+def test_malformed_guide_grid_is_rejected() -> None:
+    state = AppState(current_model=(trimesh.creation.box(), "box"))
+    state.guide_surfaces = [
+        GuideSurfaceSnapshot(np.zeros(3), np.array([1.0, 0.0, 0.0, 0.0]), 0)
+    ]
+    content = save_scene(state)
+    with zipfile.ZipFile(io.BytesIO(content)) as source:
+        files = {name: source.read(name) for name in source.namelist()}
+    manifest = json.loads(files["manifest.json"])
+    manifest["guide_surfaces"][0]["heights_mm"] = [[0.0]]
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        for name, data in files.items():
+            archive.writestr(
+                name,
+                json.dumps(manifest) if name == "manifest.json" else data,
+            )
+
+    with pytest.raises(ValueError, match="4x4"):
+        load_scene(output.getvalue())
+
+
+def test_every_sample_scene_loads() -> None:
+    for path in Path("samples").glob("*.pentos"):
+        loaded = load_scene(path.read_bytes())
+        assert loaded.current_model is not None, path

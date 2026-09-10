@@ -2,34 +2,92 @@
 
 ## Project Structure & Module Organization
 
-This is a small Python 3.13 slicer application organized into MVC packages. `main.py` starts the Viser UI. `models/` stores shared state, `controllers/` coordinates workflows, `views/` owns Viser rendering, and `services/` contains model I/O, slicing, preview parsing, integrations, and machine-specific G-code workflows. `gcode_tools/` contains reusable G-code parsing and transformation utilities. Shared machine constants live in `machine.py`; colors and UI theme setup live in `views/theming.py`.
+Pentos Slicer is a Python 3.13 Viser application organized into MVC-style
+packages. `main.py` creates the server and one `AppController` per browser
+client. `models/` contains shared session state and data containers;
+`controllers/` owns workflow and navigation; `views/` owns Viser GUI and scene
+handles; and `services/` contains mesh/project I/O, plane selection, slicing,
+volumetric deformation, G-code mapping, and preview parsing. Reusable G-code
+parsing and transformations belong in `gcode_tools/`. The A/B rotation matrix
+lives in `machine.py`; machine profile data lives in
+`models/machine_config.py`; theme and build-plate rendering live in
+`views/theming.py`.
 
-Static and sample inputs are kept in `assets/` and `samples/`. `pentos_config.ini` is the PrusaSlicer profile used by the slicing pipeline. Generated or local runtime data belongs in `uploaded_models/`, `temp/`, and `output/`; these paths are ignored and should not be committed.
+Static assets and example inputs live in `assets/` and `samples/`.
+`pentos_config.ini` is the PrusaSlicer profile used by `services/slicing.py`.
+Design notes live in `docs/`. Development helpers live in `dev/`.
 
-## Nonplanar Slicer References
+Runtime data is isolated by client in a `SessionWorkspace` below the operating
+system temporary directory, normally `/tmp/pentos-slicer/<client-id>-*/`.
+Uploads, intermediate STLs/G-code, and final G-code are temporary and are
+removed after disconnect once an active slice finishes. Do not add new
+repository-root runtime paths. `uploaded_models/`, `temp/`, and `output/` remain
+ignored as legacy/local scratch locations.
 
-Local reference checkouts are available in `reference/`:
+## Nonplanar and Firmware References
 
-- `reference/S3_DeformFDM/` contains the BSD-3-Clause S³-Slicer implementation.
-- `reference/S4_Slicer/` contains the GPL-3.0 S4 Slicer implementation and notebook.
+Ignored local reference checkouts are available in `reference/`:
 
-Inspect these when working on tetrahedral deformation, scalar fields, inverse
-mapping, extrusion correction, or multi-axis motion. Pentos is GPL-3.0 licensed,
-so S4 code may be adapted while preserving its copyright and attribution.
+- `reference/S3_DeformFDM/` contains the BSD-3-Clause S³-Slicer
+  implementation.
+- `reference/S4_Slicer/` contains the GPL-3.0 S4 Slicer implementation and
+  notebook.
+- `reference/klipper/` contains a Klipper source checkout for firmware-command
+  and motion semantics.
+
+Inspect S3/S4 when changing tetrahedral deformation, guide-constrained scalar
+fields, inverse mapping, extrusion correction, or multi-axis motion. Pentos is
+GPL-3.0 licensed, so S4 code may be adapted while preserving its copyright and
+attribution. Use the Klipper checkout only to verify upstream behavior; Pentos
+macros such as `HOME_A`, `HOME_B`, and `ENABLE_FIVE_AXIS` are machine-specific.
+
+`docs/nonplanar-slicing-concept.md` records the longer-term research direction.
+The core warp-slice-unwarp path is now implemented, but the document's collision,
+reachability, and layer-quality checks are still future requirements.
 
 ## Build, Test, and Development Commands
 
-- `uv sync` installs the Python environment from `pyproject.toml` and `uv.lock`.
-- `uv run python main.py` starts the local Viser app and prints the browser URL.
+- `uv sync --locked` installs the environment from `pyproject.toml` and
+  `uv.lock`.
+- `uv run python main.py` starts the Viser app and prints its browser URL.
+- `./dev/reload.sh` restarts the app when Python files change.
+- `uv run ruff format .` formats the Python tree.
+- `uv run ruff format --check .` verifies formatting as CI does.
+- `uv run ruff check .` runs lint checks.
 - `uv run pytest` runs the automated test suite.
-- `uv run ruff format .` formats the Python modules using the configured dev dependency.
-- `uv run python -m compileall .` performs a quick syntax check across the repository.
+- `uv run python -m compileall .` performs a quick syntax check.
 
-Slicing requires the external `prusa-slicer` executable on `PATH`; `services/slicing.py` invokes it directly with `pentos_config.ini`.
+Slicing requires the external `prusa-slicer` executable on `PATH` and invokes it
+with `pentos_config.ini`. The Docker image installs PrusaSlicer. At runtime,
+`MAX_CONCURRENT_SLICES` controls the server-wide slice semaphore (default `2`),
+and `MAX_UPLOAD_SIZE_MB` controls the upload limit (default `50`). Both must be
+positive integers.
+
+## Application and Persistence Context
+
+Each connected client has its own `AppState`, controllers, views, slicer, and
+temporary workspace. Only the slice semaphore is shared across clients. On
+disconnect, controller handles and workspace files must be cleaned up without
+affecting another session.
+
+The active `MachineConfig` is stored in browser local storage under
+`pentos-machine-config`. Machine profiles use the `pentos-machine` JSON format,
+currently version 1. Saved `.pentos` projects are ZIP archives containing
+`manifest.json` and `model.3mf`; new saves use manifest version 2 and include
+model placement, planes, guide surfaces, slicing mode, and debug mode. Runtime
+plane and guide IDs are reconstructed when loading and are not serialized.
+
+Keep model state independent of Viser handles. Controllers update canonical
+snapshots as edits occur; views render that state and forward callbacks;
+services do filesystem, subprocess, geometry, and G-code work. Preserve the
+import boundaries enforced by `tests/test_architecture.py`.
 
 ## Machine Mechanics Context
 
 The Pentos machine has X/Y/Z Cartesian toolhead motion plus A/B bed rotation.
+The firmware does not compensate XYZ when A or B changes, so every required
+pivot transformation must be applied by the slicing/mapping pipeline before the
+G-code reaches the printer.
 
 Coordinate frame:
 
@@ -37,70 +95,93 @@ Coordinate frame:
 - "From the front" means standing at `Y=0` and looking toward increasing `Y`
   (`Y=235` on the current machine).
 - "From the top" means looking down along `-Z`.
-- The slicer-local build plate is `90mm x 90mm`.
-- The slicer-local build plate center is `[45, 45, 0]`.
-- The real machine build plate center is currently `[113, 52, 0]`.
-- `MACHINE_OFFSET` maps slicer-local plate coordinates to the real machine
-  plate center.
+- The default slicer-local build volume is `90 x 90 x 90 mm`, with plate center
+  `[45, 45, 0]`.
+- The default real machine plate center is `[113, 52, 0]`.
+- The default real A/B rotation center is `[112, 51, 2]`, which maps to
+  slicer-local `[44, 44, 2]`.
+- `MachineConfig.machine_offset` maps slicer-local plate coordinates to the real
+  machine plate center. `rotation_center_local_mm` derives the pivot used for
+  transformations.
 
-A/B rotation conventions:
+These are profile defaults, not universal constants. Geometry changes belong in
+`MachineConfig` and the versioned JSON import/export path, not as new module
+globals. The active profile may also carry A/B velocity and acceleration values,
+the permitted B range, and the maximum normal error. Currently the nonplanar
+mapper enforces the B range and normal-error bound; the velocity and acceleration
+fields are recorded but are not yet enforced as hard motion limits.
+
+A/B conventions:
 
 - `A = 0` means the bed/chunk is flat.
-- Positive `A` tilts clockwise when looking from the front.
-- With positive `A`, the `-X` side rises and the `+X` side lowers.
-- `B` is the circular bed/spindle rotation.
-- Positive `B` spins clockwise when looking from the top.
-- With positive `B`, a mark on the `+X` side moves toward `Y=0`.
+- Positive A tilts clockwise from the front: the `-X` side rises and the `+X`
+  side lowers.
+- B is bed/spindle rotation. Positive B spins clockwise from the top: a mark on
+  the `+X` side moves toward `Y=0`.
+- `rotation_matrix(a, b)` composes tilt and twist as tested in
+  `tests/test_machine.py`. The final pose is path-independent whether A or B is
+  commanded first or both are commanded together.
 
-The current code models the A/B pose with `rotation_matrix(a, b)` in
-`machine.py`. The tested composition is path-independent: commanding `A` first,
-`B` first, or both in the same move reaches the same final physical pose.
+Slice plane normals are `print_up_normal`: the direction a chunk prints from
+bottom to top in the final object frame. For example,
+`print_up_normal = [-1, 0, 0]` corresponds to `A90 B0` with the current
+conventions. Preview rendering is a sanity check; measured machine behavior is
+the source of truth for axis signs, pivot position, and offsets.
 
-`ROTATION_CENTER` is the slicer-local build plate center with a provisional
-`Z = 1.5mm` pivot height. That hard-coded Z value is subject to change depending
-on bed height, fixture stackup, and measured distance between the modeled bed
-surface and the real A/B rotation axis.
+## Slicing Pipeline Context
 
-The firmware does not do A/B coordinate compensation. When A or B changes, the
-firmware does not automatically transform future X/Y/Z moves into the rotated
-bed frame. Any required compensation must be handled by the slicer/merge
-pipeline before the G-code reaches the printer.
+For multiplanar slicing, planes decompose the transformed source mesh in list
+order. Non-base pieces are rotated about the configured local pivot, placed on
+the local PrusaSlicer bed, and assigned a temporary `flat_xy_offset`. During
+merge, Pentos applies the machine offset, removes `flat_xy_offset`, restores the
+piece's `z_offset`, and inserts a 15 mm relative Z lift before each A/B
+transition. The centering offset is never a physical machine target. Debug mode
+emits only the transition-check motion rather than a full print.
 
-Slice plane normals are treated as `print_up_normal`: the direction the chunk
-should print from bottom to top in the final object frame. For example, a chunk
-with `print_up_normal = [-1, 0, 0]` is expected to print with `A90 B0` on the
-current machine.
+For nonplanar slicing, at least two guide surfaces constrain a scalar field on a
+tetrahedral volume. The volume is flattened, its boundary is sliced once by
+PrusaSlicer, and moves after the first two planar layers are subdivided and
+inverse-mapped. Mapping blends in over four layers, adjusts extrusion and feed
+rate, smooths normals/A-B angles within the configured error, and compensates
+XYZ around the local rotation center before adding the machine offset. It
+requires relative extrusion for mapped positive-extrusion moves.
 
-When a chunk is prepared for PrusaSlicer, the chunk may be rotated/flattened and
-then shifted onto the slicer's local build plate. That shift is stored as
-`flat_xy_offset`. It is a temporary PrusaSlicer centering move, not a physical
-machine target by itself. During merge, non-base chunk G-code is translated into
-machine coordinates, shifted up by `z_offset`, and adjusted by
-`-flat_xy_offset` in X/Y so the temporary centering does not move the physical
-continuation point.
-
-Preview rendering is useful for sanity checks, but the real machine behavior is
-the source of truth for A/B sign, pivot, and offset verification.
+Do not describe generated paths as collision-validated or generally
+machine-safe. Full collision, reachability, local layer-thickness, and angular
+limit validation remain future work. Treat real-machine testing as a deliberate
+hardware validation step.
 
 ## Keep Changes Simple
 
 Prefer the smallest coherent change that solves the requested problem. Reuse
 existing control flow and data structures before introducing abstractions,
 background work, debounce logic, configuration, or generalized APIs. Do not
-modify unrelated code or add defensive machinery for cases the application
-cannot produce. Add complexity only when a concrete requirement, failure mode,
-or measured performance problem justifies it.
+modify unrelated code or add defensive machinery for states the application
+cannot produce. Add complexity only for a concrete requirement, failure mode,
+or measured performance problem.
 
 Keep tests focused on the behavior being added or fixed. Cover the important
-path and meaningful edge cases without expanding the implementation's public
-surface solely to make it testable. After a change works, review the diff and
-remove redundant state, duplicate refreshes, unnecessary callbacks, and helpers
-used only once when inline code is clearer.
+path and meaningful edge cases without expanding the public surface solely for
+testability. After a change works, inspect the diff and remove redundant state,
+duplicate refreshes, unnecessary callbacks, and one-use helpers when inline code
+is clearer.
 
 ## Coding Style & Naming Conventions
 
-Use Ruff formatting and 4-space indentation. Prefer type annotations for public functions and data containers; current modules use `dataclass`, `Protocol`, and explicit `Path`/`numpy` types where useful. Keep module names lowercase with underscores, function and variable names in `snake_case`, and constants in `UPPER_SNAKE_CASE`. Keep comments short and reserved for non-obvious geometry, machine, or G-code behavior.
+Use Ruff formatting and four-space indentation. Prefer type annotations for
+public functions and data containers; existing modules use `dataclass`,
+`Protocol`, and explicit `Path`/NumPy types where useful. Use lowercase
+underscore module names, `snake_case` functions and variables, and
+`UPPER_SNAKE_CASE` constants. Keep comments short and reserve them for
+non-obvious geometry, machine, or G-code behavior.
 
 ## Testing Guidelines
 
-Run `uv run pytest` for automated coverage. Validate visible or machine-facing changes manually with `uv run python main.py`, load a sample or uploaded model, exercise plane controls, run slicing when `prusa-slicer` is available, and inspect the generated files in `output/`. Use `uv run python -m compileall .` as a quick syntax check before handing off changes.
+Run formatting, linting, and `uv run pytest` for changes. Use focused tests while
+iterating, then the full suite before handoff. For visible changes, run the app
+and load a representative sample or uploaded model. For multiplanar changes,
+exercise manual/automatic planes and inspect transition G-code. For nonplanar
+changes, load a closed sample, use at least two guides, and inspect the mapped
+XYZAB path and rotary plot. Run PrusaSlicer when the external executable is
+available. Generated artifacts are in the active session workspace and should be
+downloaded through the UI when they need to be retained.

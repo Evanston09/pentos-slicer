@@ -67,7 +67,7 @@ def make_manifest(top_height: float, curvature: float) -> dict:
     guide_heights = [height * scale for height in GUIDE_HEIGHTS]
     return {
         "format": "pentos",
-        "version": 2,
+        "version": 3,
         "original_model_name": "flat_base_curved_top",
         "model_xy_position": [CENTER_X, CENTER_Y],
         "model_z_degrees": 0.0,
@@ -76,8 +76,14 @@ def make_manifest(top_height: float, curvature: float) -> dict:
             {
                 "position": [CENTER_X, CENTER_Y, height],
                 "wxyz": [1.0, 0.0, 0.0, 0.0],
-                "bend_x": -curvature * height / top_height,
-                "bend_y": 0.0,
+                "size_mm": [100.0, 100.0],
+                "heights_mm": [
+                    [
+                        -curvature * height / top_height * x**2
+                        for x in np.linspace(-50.0, 50.0, 4)
+                    ]
+                    for _ in range(4)
+                ],
             }
             for height in guide_heights
         ],

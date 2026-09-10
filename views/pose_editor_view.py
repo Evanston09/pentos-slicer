@@ -23,7 +23,6 @@ class PoseState:
     pose: Any
     anchor: Any
     gizmo: Any
-    gui: dict[str, Any]
     start_position: np.ndarray | None = None
     start_wxyz: np.ndarray | None = None
 
@@ -40,6 +39,9 @@ class PoseEditorView:
         delete_label: str,
         scene_prefix: str,
         gizmo_size: float,
+        extras_factory: Callable[[], dict[str, Any]] | None = None,
+        extras_populate: Callable[[], None] | None = None,
+        on_selection_changed: Callable[[int | None], None] | None = None,
     ) -> None:
         self.client = client
         self.on_changed = on_changed
@@ -49,20 +51,28 @@ class PoseEditorView:
         self.delete_label = delete_label
         self.scene_prefix = scene_prefix
         self.gizmo_size = gizmo_size
+        self.extras_factory = extras_factory
+        self.extras_populate = extras_populate
+        self.on_selection_changed = on_selection_changed
         self.gui_container: Any | None = None
         self.items: dict[int, PoseState] = {}
         self.syncing_gui = False
         self.visible = True
+        self.selected_id: int | None = None
+        self.panel: Any | None = None
+        self.gui: dict[str, Any] = {}
 
     def add(
         self,
         item_id: int,
         position: np.ndarray,
         wxyz: np.ndarray,
-        add_extra_controls: Callable[[], dict[str, Any]] | None = None,
+        *,
+        select: bool = True,
     ) -> PoseState:
         if self.gui_container is None:
             raise RuntimeError("Set a GUI container before adding items")
+        self._ensure_panel()
 
         pose = self.client.scene.add_frame(
             f"{self.scene_prefix}/{item_id}/pose",
@@ -82,97 +92,123 @@ class PoseEditorView:
             depth_test=False,
         )
 
-        rx, ry, rz = self._euler_degrees(pose.wxyz)
-        with self.gui_container:
-            folder = self.client.gui.add_folder(
-                f"{self.item_label} {item_id}",
-                expand_by_default=True,
-            )
-        with folder:
-            position_control = self.client.gui.add_vector3(
-                "Position", pose.position, step=0.001
-            )
-            rotation_x = self.client.gui.add_number("Rotation X", rx, step=1.0)
-            rotation_y = self.client.gui.add_number("Rotation Y", ry, step=1.0)
-            rotation_z = self.client.gui.add_number("Rotation Z", rz, step=1.0)
-            extra_controls = {} if add_extra_controls is None else add_extra_controls()
-            snap_button = self.client.gui.add_button("Snap to Face")
-            delete_button = self.client.gui.add_button(self.delete_label)
-
-        state = PoseState(
-            pose=pose,
-            anchor=anchor,
-            gizmo=gizmo,
-            gui={
-                "folder": folder,
-                "position": position_control,
-                "rotation_x": rotation_x,
-                "rotation_y": rotation_y,
-                "rotation_z": rotation_z,
-                **extra_controls,
-                "snap_button": snap_button,
-                "delete_button": delete_button,
-            },
-        )
+        state = PoseState(pose=pose, anchor=anchor, gizmo=gizmo)
         self.items[item_id] = state
 
         @gizmo.on_update
         async def _(event) -> None:
             self._on_gizmo_update(item_id, event)
 
-        @position_control.on_update
-        def _(_) -> None:
-            if not self.syncing_gui and item_id in self.items:
-                self._set_pose(item_id, position=position_control.value)
-                self._notify_changed(item_id)
-
-        def update_rotation() -> None:
-            if self.syncing_gui or item_id not in self.items:
-                return
-            self._set_pose(
-                item_id,
-                wxyz=tf.quaternion_from_euler(
-                    np.radians(rotation_x.value),
-                    np.radians(rotation_y.value),
-                    np.radians(rotation_z.value),
-                    axes="sxyz",
-                ),
-            )
-            self._notify_changed(item_id)
-
-        @rotation_x.on_update
-        def _(_) -> None:
-            update_rotation()
-
-        @rotation_y.on_update
-        def _(_) -> None:
-            update_rotation()
-
-        @rotation_z.on_update
-        def _(_) -> None:
-            update_rotation()
-
-        @snap_button.on_click
-        def _(_) -> None:
-            self.on_snap_requested(item_id)
-
-        @delete_button.on_click
-        def _(_) -> None:
-            self.on_deleted(item_id)
+        if select:
+            self.select(item_id)
+        else:
+            self._refresh_gizmos()
 
         return state
 
+    def _ensure_panel(self) -> None:
+        if self.panel is not None:
+            return
+        with self.gui_container:
+            panel = self.client.gui.add_folder(
+                self.item_label,
+                expand_by_default=True,
+                visible=False,
+            )
+        with panel:
+            position_control = self.client.gui.add_vector3(
+                "Position", np.zeros(3), step=0.001
+            )
+            rotation_control = self.client.gui.add_vector3(
+                "Rotation", [0.0, 0.0, 0.0], step=1.0
+            )
+            extras = {} if self.extras_factory is None else self.extras_factory()
+            snap_button = self.client.gui.add_button("Snap to Face")
+            delete_button = self.client.gui.add_button(self.delete_label)
+
+        self.panel = panel
+        self.gui = {
+            "position": position_control,
+            "rotation": rotation_control,
+            **extras,
+        }
+
+        @position_control.on_update
+        def _(_) -> None:
+            if self.syncing_gui or self.selected_id is None:
+                return
+            self._set_pose(self.selected_id, position=self.gui["position"].value)
+            self._notify_changed(self.selected_id)
+
+        @rotation_control.on_update
+        def _(_) -> None:
+            if self.syncing_gui or self.selected_id is None:
+                return
+            rx, ry, rz = self.gui["rotation"].value
+            self._set_pose(
+                self.selected_id,
+                wxyz=tf.quaternion_from_euler(
+                    np.radians(rx),
+                    np.radians(ry),
+                    np.radians(rz),
+                    axes="sxyz",
+                ),
+            )
+            self._notify_changed(self.selected_id)
+
+        @snap_button.on_click
+        def _(_) -> None:
+            if self.selected_id is not None:
+                self.on_snap_requested(self.selected_id)
+
+        @delete_button.on_click
+        def _(_) -> None:
+            if self.selected_id is not None:
+                self.on_deleted(self.selected_id)
+
+    def select(self, item_id: int) -> None:
+        if item_id not in self.items:
+            return
+        changed = self.selected_id != item_id
+        self.selected_id = item_id
+        if changed and self.on_selection_changed is not None:
+            self.on_selection_changed(item_id)
+        if self.panel is not None:
+            self.panel.visible = self.visible
+            self.panel.label = f"{self.item_label} {item_id}"
+            self._sync_gui_from_pose(item_id)
+            if self.extras_populate is not None:
+                self.extras_populate()
+        self._refresh_gizmos()
+
+    def clear_selection(self) -> None:
+        changed = self.selected_id is not None
+        self.selected_id = None
+        if changed and self.on_selection_changed is not None:
+            self.on_selection_changed(None)
+        if self.panel is not None:
+            self.panel.visible = False
+        self._refresh_gizmos()
+
     def clear(self) -> None:
         for item_id in list(self.items):
-            self.remove(item_id)
+            self._remove_item(item_id)
+        self.clear_selection()
 
     def remove(self, item_id: int) -> None:
+        was_selected = self.selected_id == item_id
+        self._remove_item(item_id)
+        if not was_selected:
+            return
+        if self.items:
+            self.select(next(iter(self.items)))
+        else:
+            self.clear_selection()
+
+    def _remove_item(self, item_id: int) -> None:
         state = self.items.pop(item_id, None)
         if state is None:
             return
-        for handle in reversed(state.gui.values()):
-            handle.remove()
-        state.gui.clear()
         state.gizmo.remove()
         state.anchor.remove()
         state.pose.remove()
@@ -182,6 +218,9 @@ class PoseEditorView:
         for state in self.items.values():
             state.pose.visible = visible
             state.anchor.visible = visible
+        self._refresh_gizmos()
+        if self.panel is not None:
+            self.panel.visible = visible and self.selected_id is not None
 
     def set_pose(
         self,
@@ -230,16 +269,16 @@ class PoseEditorView:
         self._notify_changed(item_id)
 
     def _sync_gui_from_pose(self, item_id: int) -> None:
+        if item_id != self.selected_id or self.panel is None:
+            return
         state = self.items.get(item_id)
         if state is None:
             return
         self.syncing_gui = True
         try:
             rx, ry, rz = self._euler_degrees(state.pose.wxyz)
-            state.gui["position"].value = state.pose.position
-            state.gui["rotation_x"].value = rx
-            state.gui["rotation_y"].value = ry
-            state.gui["rotation_z"].value = rz
+            self.gui["position"].value = state.pose.position
+            self.gui["rotation"].value = (rx, ry, rz)
         finally:
             self.syncing_gui = False
 
@@ -251,6 +290,10 @@ class PoseEditorView:
                 np.array(state.pose.position),
                 np.array(state.pose.wxyz),
             )
+
+    def _refresh_gizmos(self) -> None:
+        for item_id, state in self.items.items():
+            state.gizmo.visible = self.visible and item_id == self.selected_id
 
     @staticmethod
     def _reset_gizmo(state: PoseState) -> None:

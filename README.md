@@ -1,151 +1,177 @@
 # Pentos Slicer
 
-Pentos Slicer is a small Python 3.13 web UI for preparing a model, placing
-interactive slice planes, exporting oriented STL chunks, running PrusaSlicer,
-and merging the generated G-code with Pentos A/B transition moves.
+Pentos Slicer is an experimental browser-based toolpath pipeline for the Pentos
+five-axis FFF printer: an XYZ toolhead with an A/B rotating bed. It uses
+[Viser](https://viser.studio/) for the interactive 3D UI and PrusaSlicer as the
+planar toolpath engine.
 
-The app uses [Viser](https://viser.studio/) for the browser-based 3D interface
-and `trimesh` for model loading and geometry operations.
+The application currently supports two workflows:
 
-## Demo
+- **Multiplanar** divides a model with editable planes, flattens and slices each
+  chunk, then merges the results with Pentos A/B transition moves.
+- **Nonplanar** uses editable guide surfaces to deform a tetrahedralized model,
+  slices the flattened mesh, and inverse-maps the G-code into continuous XYZAB
+  motion with extrusion and pivot compensation.
 
-<table>
-  <tr>
-    <td width="50%">
-      <img src="docs/images/pentos-slicer-setup.jpg" alt="Pentos Slicer setup view with a model, slice plane, and transform gizmos">
-    </td>
-    <td width="50%">
-      <img src="docs/images/pentos-slicer-preview.jpg" alt="Pentos Slicer preview showing two oriented parts and generated G-code">
-    </td>
-  </tr>
-  <tr>
-    <td align="center"><em>Place and orient interactive slice planes</em></td>
-    <td align="center"><em>Preview the generated multi-part toolpath</em></td>
-  </tr>
-</table>
+> [!WARNING]
+> This is research software. Generated G-code is machine-specific and the
+> pipeline does not yet perform complete collision, reachability, or local layer
+> thickness validation. Inspect previews and G-code before using real hardware.
 
 ## Requirements
 
-- Python 3.13
-- `uv`
-- `prusa-slicer` available on `PATH` when running the full slicing pipeline
+- Python 3.13 or newer
+- [`uv`](https://docs.astral.sh/uv/)
+- `prusa-slicer` on `PATH` for slicing (not needed to inspect the UI or load a
+  saved project)
 
-Install the Python environment:
+Install the locked Python environment:
 
 ```bash
-uv sync
+uv sync --locked
 ```
 
 ## Run
 
-Start the local Viser app:
+Start the Viser server:
 
 ```bash
 uv run python main.py
 ```
 
-For development, restart it automatically whenever a Python file changes:
+Open the URL printed in the terminal, normally `http://localhost:8080`. Viser
+may choose the next available port if 8080 is already occupied.
+
+For development, restart the server whenever a Python file changes:
 
 ```bash
-./dev.sh
+./dev/reload.sh
 ```
 
-Open the URL printed in the terminal, usually:
-
-```text
-http://localhost:8080
-```
-
-Or build and run it with Docker:
+The Docker image includes Python, the locked dependencies, and PrusaSlicer:
 
 ```bash
 docker build -t pentos-slicer .
 docker run --rm -p 8080:8080 pentos-slicer
 ```
 
-At most two models are sliced concurrently by default. Set
-`MAX_CONCURRENT_SLICES` to a positive integer to change that limit.
-Uploads are limited to 50 MB by default. Set `MAX_UPLOAD_SIZE_MB` to a positive
-integer to change that limit.
+Two slices may run concurrently by default. Set `MAX_CONCURRENT_SLICES` to a
+positive integer to change that server-wide limit. Uploads are limited to 50 MB
+by default; set `MAX_UPLOAD_SIZE_MB` to a positive integer to change the limit.
 
-## Basic Workflow
+## Workflow
 
-1. Upload a model (`.stl`, `.3mf`, `.obj`, or `.ply`).
-2. Add one or more slice planes.
-3. Move or rotate planes with the viewport gizmo or GUI controls.
-4. Click **Slice**.
-5. The app switches to a preview shell showing the generated G-code path.
-6. Click **Back to Setup** to return to the model and plane controls.
+1. Upload a mesh (`.stl`, `.3mf`, `.obj`, or `.ply`) or a saved `.pentos`
+   project. New mesh uploads are normalized to millimeters, centered on the
+   local build plate, and placed at Z=0.
+2. Adjust X/Y placement and Z rotation. **Show Overhangs** highlights geometry
+   that the current multiplanar decomposition leaves unsupported.
+3. Choose a slicing mode:
+   - In **Multiplanar**, add planes manually or use **Auto Planes**. Edit a plane
+     with its viewport gizmo, numeric controls, or **Snap to Face**.
+   - In **Nonplanar**, add at least two guide surfaces. Position, orient, and
+     bend them with the guide controls; **Visualize Scalar Field** previews the
+     solved field on the model boundary.
+4. Optionally use **Export Scene** to save the model, placement, mode, planes,
+   guides, and debug setting as a `.pentos` project.
+5. Click **Slice**. The UI reports deformation, PrusaSlicer, merge, and mapping
+   progress before opening the preview.
+6. Inspect extrusion and travel paths, the estimated print time, and the A/B
+   motion graph when rotary commands are present. Use **Download G-code** to
+   save the result.
 
-Sample models are available in `samples/`.
+Example meshes and projects for both workflows live in `samples/`.
+
+## Slicing Modes
+
+### Multiplanar
+
+Planes are applied in order. The base piece keeps the flat bed pose; each piece
+above a cut is oriented from its plane normal, shifted onto PrusaSlicer's local
+build plate, and sliced separately. Pentos then removes the temporary centering
+offset, applies the configured machine offset, and inserts a 15 mm relative Z
+lift before each A/B transition.
+
+**Debug Mode** emits a shortened transition-check program instead of the full
+merged print, allowing the inter-chunk poses to be inspected on the machine.
+
+### Nonplanar
+
+Guide surfaces constrain a volumetric scalar field. Pentos tetrahedralizes and
+flattens the model, runs a normal planar slice, subdivides the resulting moves,
+then inverse-maps them through the deformation. The mapper compensates XYZ for
+the bed pivot, adjusts extrusion and feed rate, and smooths A/B orientation
+within the configured normal-error limit.
+
+The first two layers remain planar and the mapping blends in over the following
+four layers. This workflow requires a closed, tetrahedralizable mesh and at
+least two guide surfaces.
 
 ## Machine Configuration
 
-The **Machine** panel imports and exports versioned `.json` machine profiles.
-The active profile is saved in the browser and restored on future visits. Profiles
-contain machine geometry; the PrusaSlicer profile remains in `pentos_config.ini`.
+The **Machine** panel imports, exports, resets, and displays versioned JSON
+profiles. The active profile is stored in browser local storage and restored for
+future sessions. The default exported profile is equivalent to:
 
 ```json
 {
   "format": "pentos-machine",
   "version": 1,
-  "name": "My Pentos",
-  "build_volume_mm": [90, 90, 90],
-  "machine_plate_center_mm": [113, 52, 0],
-  "rotation_center_machine_mm": [112, 51, 2]
+  "name": "Default Pentos",
+  "build_volume_mm": [90.0, 90.0, 90.0],
+  "machine_plate_center_mm": [113.0, 52.0, 0.0],
+  "rotation_center_machine_mm": [112.0, 51.0, 2.0],
+  "a_max_velocity_deg_s": 10.0,
+  "a_max_acceleration_deg_s2": 50.0,
+  "b_max_velocity_deg_s": 20.0,
+  "b_max_acceleration_deg_s2": 100.0,
+  "max_normal_error_degrees": 2.0,
+  "b_degrees_min": -180.0,
+  "b_degrees_max": 180.0
 }
 ```
 
-`machine_plate_center_mm` and `rotation_center_machine_mm` are in machine
-coordinates. Pentos derives the slicer-local plate center, machine offset, and
-local rotation center from these values.
+`build_volume_mm` defines the slicer-local volume. The plate and rotation-center
+fields use real machine coordinates; Pentos derives the local plate center,
+machine offset, and local A/B pivot from them. PrusaSlicer settings remain in
+`pentos_config.ini`.
 
 ## Project Layout
 
-- `main.py` starts the Viser server and mounts the application controller.
-- `models/` stores shared application state, plane snapshots, and preview data.
-- `controllers/` coordinates setup, preview, slicing, export, and navigation.
-- `views/` contains the Viser UI, scene rendering, plane editor, and theme.
-- `services/` contains model/project I/O, slicing, preview parsing, and
-  Pentos-specific G-code workflows.
+- `main.py` creates the Viser server and one isolated application session per
+  connected client.
+- `models/` contains application state, machine profiles, planes, guides, and
+  preview data.
+- `controllers/` coordinates setup, nonplanar deformation, slicing, preview,
+  downloads, and navigation.
+- `views/` owns Viser controls and scene rendering.
+- `services/` contains model/project I/O, automatic plane selection, planar and
+  nonplanar slicing, volumetric deformation, and G-code preview parsing.
 - `gcode_tools/` contains reusable G-code parsing and transformation utilities.
-- `machine.py` stores machine geometry constants.
-- `samples/` contains example models and saved Pentos scenes.
+- `machine.py` defines the tested A/B rotation matrix.
+- `pentos_config.ini` is the PrusaSlicer profile used by the pipeline.
+- `samples/` contains example meshes and `.pentos` projects.
+- `docs/` contains design notes, and `reference/` contains ignored local
+  research and firmware checkouts.
 
-Generated runtime files are written to `uploaded_models/`, `temp/`, and
-`output/`. These are local outputs and should not be committed.
-
-## App Structure
-
-`AppController` is the composition root. It creates the shared `AppState`,
-services, screen controllers, and views:
-
-- Models hold data independently of Viser and external processes.
-- Controllers mutate application state and coordinate services.
-- Services perform geometry, filesystem, slicing, parsing, and network work.
-- Views create Viser handles, render state, and forward user actions.
-
-Plane edits update controller-owned snapshots as they happen. Runtime plane IDs
-are not included in version-1 `.pentos` manifests, so existing scenes remain
-compatible.
+Each browser connection gets a temporary workspace under the operating system's
+temporary directory (normally `/tmp/pentos-slicer/`). Uploads, intermediate
+meshes, and generated G-code are removed after that client disconnects, once any
+active slice completes. Download projects or G-code through the UI if you want
+to keep them.
 
 ## Development Checks
 
-Format touched Python files:
-
 ```bash
-uv run ruff format .
-```
-
-Run tests and a quick syntax check:
-
-```bash
+uv run ruff format --check .
+uv run ruff check .
 uv run pytest
 uv run python -m compileall .
 ```
 
-For visible UI changes, run the app, load a sample model, add a plane, and
-exercise the setup-to-preview flow.
+Use `uv run ruff format .` to format changes. For visible or machine-facing
+work, also run the app, load representative projects from `samples/`, exercise
+both slicing modes where relevant, and inspect the downloaded G-code.
 
 ## License
 

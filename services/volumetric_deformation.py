@@ -274,29 +274,23 @@ def solve_guide_scalar_field(
     guides: list[GuideSurfaceSnapshot],
 ) -> np.ndarray:
     """Solve the smooth scalar field whose level sets include the guide surfaces."""
-    ordered = sorted(guides, key=lambda item: item.guide_id)
-    if len(ordered) < 2:
+    if len(guides) < 2:
         raise ValueError("Add at least two guides to define the flattened layer range")
 
-    positions = np.asarray([guide.position for guide in ordered])
+    positions = np.asarray([guide.position for guide in guides])
     segment_lengths = np.linalg.norm(np.diff(positions, axis=0), axis=1)
     if np.any(np.isclose(segment_lengths, 0.0)):
         raise ValueError("Adjacent guides must have different positions")
     guide_heights = np.concatenate(([0.0], np.cumsum(segment_lengths)))
 
+    edge_pairs = np.array(((0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)))
     edges = np.unique(
-        np.sort(
-            volume.tetrahedra[:, ([0, 0, 0, 1, 1, 2], [1, 2, 3, 2, 3, 3])].reshape(
-                -1, 2
-            ),
-            axis=1,
-        ),
-        axis=0,
+        np.sort(volume.tetrahedra[:, edge_pairs].reshape(-1, 2), axis=1), axis=0
     )
     constraints, targets = _guide_constraints(
         volume.original_vertices,
         edges,
-        ordered,
+        guides,
         guide_heights,
     )
 
@@ -398,7 +392,7 @@ def solve_guide_scalar_field(
     ).tocsr()
 
     guide_normals = np.asarray(
-        [tf.quaternion_matrix(guide.wxyz)[:3, 2] for guide in ordered]
+        [tf.quaternion_matrix(guide.wxyz)[:3, 2] for guide in guides]
     )
     preferred_gradient = guide_normals.mean(axis=0)
     preferred_gradient /= np.linalg.norm(preferred_gradient)
@@ -466,75 +460,19 @@ def _guide_constraints(
     column_indices = []
     values = []
     targets = []
-    endpoints = vertices[edges]
-    tolerance = 1e-10
-
     for guide, height in zip(guides, guide_heights):
-        rotation = tf.quaternion_matrix(guide.wxyz)[:3, :3]
-        local = (endpoints - guide.position) @ rotation
-        start = local[:, 0]
-        delta = local[:, 1] - start
-        quadratic = -guide.bend_x * delta[:, 0] ** 2 - guide.bend_y * delta[:, 1] ** 2
-        linear = (
-            delta[:, 2]
-            - 2.0 * guide.bend_x * start[:, 0] * delta[:, 0]
-            - 2.0 * guide.bend_y * start[:, 1] * delta[:, 1]
-        )
-        constant = (
-            start[:, 2]
-            - guide.bend_x * start[:, 0] ** 2
-            - guide.bend_y * start[:, 1] ** 2
-        )
-        roots: list[tuple[int, float]] = []
-        for edge_index in np.flatnonzero(
-            np.isclose(quadratic, 0.0, atol=tolerance)
-            & ~np.isclose(linear, 0.0, atol=tolerance)
+        first_row = len(targets)
+        for edge, roots in zip(
+            edges, _guide_edge_intersections(vertices, edges, guide)
         ):
-            roots.append(
-                (int(edge_index), float(-constant[edge_index] / linear[edge_index]))
-            )
-        discriminants = linear**2 - 4.0 * quadratic * constant
-        for edge_index in np.flatnonzero(
-            ~np.isclose(quadratic, 0.0, atol=tolerance) & (discriminants >= 0.0)
-        ):
-            root = np.sqrt(discriminants[edge_index])
-            roots.extend(
-                (
-                    (
-                        int(edge_index),
-                        float(
-                            (-linear[edge_index] - root) / (2.0 * quadratic[edge_index])
-                        ),
-                    ),
-                    (
-                        int(edge_index),
-                        float(
-                            (-linear[edge_index] + root) / (2.0 * quadratic[edge_index])
-                        ),
-                    ),
-                )
-            )
-        for edge_index in np.flatnonzero(
-            np.isclose(quadratic, 0.0, atol=tolerance)
-            & np.isclose(linear, 0.0, atol=tolerance)
-            & np.isclose(constant, 0.0, atol=tolerance)
-        ):
-            roots.extend(((int(edge_index), 0.0), (int(edge_index), 1.0)))
-
-        accepted = [
-            (edge_index, np.clip(amount, 0.0, 1.0))
-            for edge_index, amount in roots
-            if -tolerance <= amount <= 1.0 + tolerance
-        ]
-        if not accepted:
+            for amount in roots:
+                row = len(targets)
+                row_indices.extend((row, row))
+                column_indices.extend(edge)
+                values.extend((1.0 - amount, amount))
+                targets.append(height)
+        if len(targets) == first_row:
             raise ValueError(f"Guide {guide.guide_id} does not intersect the model")
-        for edge_index, amount in accepted:
-            row = len(targets)
-            first, second = edges[edge_index]
-            row_indices.extend((row, row))
-            column_indices.extend((first, second))
-            values.extend((1.0 - amount, amount))
-            targets.append(height)
 
     return (
         coo_matrix(
@@ -543,6 +481,72 @@ def _guide_constraints(
         ).tocsr(),
         np.asarray(targets),
     )
+
+
+def _guide_edge_intersections(
+    vertices: np.ndarray,
+    edges: np.ndarray,
+    guide: GuideSurfaceSnapshot,
+) -> list[list[float]]:
+    """Intersect volume edges with the finite bicubic guide patch."""
+    endpoints = vertices[edges]
+    local = (endpoints - guide.position) @ guide.rotation
+    start = local[:, 0, :2]
+    delta = local[:, 1, :2] - start
+    half_size = guide.size_mm / 2.0
+    moving = np.abs(delta) > 1e-14
+    lower = np.divide(
+        -half_size - start, delta, out=np.full_like(delta, -np.inf), where=moving
+    )
+    upper = np.divide(
+        half_size - start, delta, out=np.full_like(delta, np.inf), where=moving
+    )
+    # Clip to the displayed patch before solving, including coplanar edges.
+    first = np.maximum(np.minimum(lower, upper).max(axis=1), 0.0)
+    last = np.minimum(np.maximum(lower, upper).min(axis=1), 1.0)
+    active = np.flatnonzero(
+        (last >= first) & np.all(moving | (np.abs(start) <= half_size + 1e-9), axis=1)
+    )
+    results: list[list[float]] = [[] for _ in edges]
+    if len(active) == 0:
+        return results
+
+    # A tensor-product cubic restricted to a line has degree at most six.
+    # Recover that polynomial, so nearby crossings need no sampling brackets.
+    nodes = np.cos(np.pi * (np.arange(7) + 0.5) / 7.0)
+    amounts = first[active, None] + (nodes + 1.0) * (
+        (last[active] - first[active])[:, None] / 2.0
+    )
+    points = (
+        endpoints[active, :1]
+        + (endpoints[active, 1:] - endpoints[active, :1]) * amounts[:, :, None]
+    )
+    coefficients = np.polynomial.chebyshev.chebfit(
+        nodes, guide.signed_height(points).T, 6
+    ).T
+    for edge_index, coefficients_on_edge in zip(active, coefficients):
+        tolerance = 1e-12 * max(1.0, np.abs(coefficients_on_edge).max())
+        polynomial = np.polynomial.chebyshev.chebtrim(
+            coefficients_on_edge, tol=tolerance
+        )
+        if np.abs(polynomial).max() <= tolerance:
+            roots = np.array([-1.0, 1.0])
+        else:
+            roots = np.polynomial.chebyshev.chebroots(polynomial)
+            roots = roots.real[np.abs(roots.imag) <= 1e-7]
+            roots = np.clip(
+                roots[(roots >= -1.0 - 1e-9) & (roots <= 1.0 + 1e-9)], -1, 1
+            )
+        amounts = np.sort(
+            first[edge_index]
+            + (roots + 1.0) * (last[edge_index] - first[edge_index]) / 2.0
+        )
+        results[edge_index] = (
+            amounts[np.concatenate(([True], np.diff(amounts) > 1e-9))].tolist()
+            if len(amounts)
+            else []
+        )
+    return results
 
 
 def tetrahedralize(mesh: trimesh.Trimesh) -> TetrahedralVolume:
