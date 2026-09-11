@@ -6,6 +6,23 @@ import pytest
 import main
 from models import MachineConfig
 from services.machine_config_io import save_machine_config
+from models import SlicingSettings
+from models.slicing_settings import filament_preset
+from services.slicing_config import save_slicing_settings
+
+
+def test_browser_slicing_settings_restore_and_invalid_fallback() -> None:
+    settings = SlicingSettings(filament=filament_preset("PETG"))
+    notifications = []
+    storage = FakeStorage(save_slicing_settings(settings))
+    client = SimpleNamespace(
+        local_storage=storage,
+        add_notification=lambda *args: notifications.append(args),
+    )
+    assert main.load_client_slicing_settings(client) == settings
+    storage.value = "invalid json"
+    assert main.load_client_slicing_settings(client) == SlicingSettings()
+    assert "Failed to load saved slicing settings" in notifications[0][1]
 
 
 class FakeServer:
@@ -30,11 +47,15 @@ class FakeStorage:
 
 
 class FakeApp:
-    def __init__(self, client, workspace, slicing_slots, machine_config) -> None:
+    def __init__(
+        self, client, workspace, slicing_slots, machine_config, slicing_settings
+    ) -> None:
         self.client = client
         self.workspace = workspace.path
         self.slicing_slots = slicing_slots
-        self.state = SimpleNamespace(machine_config=machine_config)
+        self.state = SimpleNamespace(
+            machine_config=machine_config, slicing_settings=slicing_settings
+        )
         self.shown = False
         self.closed = False
 

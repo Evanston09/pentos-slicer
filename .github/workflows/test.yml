@@ -1,6 +1,7 @@
 name: Test
 
 on:
+  pull_request:
   workflow_call:
 
 jobs:
@@ -23,11 +24,5 @@ jobs:
       - name: Install the project
         run: uv sync --locked --all-extras --dev
 
-      - name: Check formatting
-        run: uv run ruff format --check .
-
-      - name: Run linting
-        run: uv run ruff check .
-
-      - name: Run tests
-        run: uv run pytest
+      - name: Run pre-commit hooks
+        run: uv run pre-commit run --all-files
