@@ -14,9 +14,9 @@ from services.multiplanar_gcode import (
     generate_debug_transition_check,
     merge_gcode_files,
 )
+from services.slicing_config import DEFAULT_CONFIG_PATH
 
 CONTINUATION_RESTART_EXTRA_MM = 0.25
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "pentos_config.ini"
 SliceProgress = Callable[[float, str], None]
 
 
@@ -102,6 +102,7 @@ class Slicer:
         source_name: str = "model",
         *,
         progress: SliceProgress,
+        config_path: Path = DEFAULT_CONFIG_PATH,
     ) -> Path:
         progress(0.05, "Preparing model...")
         chunks = self.export_stl_chunks(mesh, planes, source_name)
@@ -110,7 +111,9 @@ class Slicer:
 
         chunk_label = "chunk" if len(chunks) == 1 else "chunks"
         progress(0.15, f"Prepared {len(chunks)} {chunk_label}")
-        gcode_paths = self.run_prusa_slicer(chunks, progress=progress)
+        gcode_paths = self.run_prusa_slicer(
+            chunks, progress=progress, config_path=config_path
+        )
 
         progress(0.9, "Combining G-code...")
         output_path = self.out_dir / f"{source_name}.gcode"
@@ -137,6 +140,7 @@ class Slicer:
         source_name: str = "model",
         *,
         progress: SliceProgress,
+        config_path: Path = DEFAULT_CONFIG_PATH,
     ) -> Path:
         progress(0.05, "Preparing model...")
         chunks = self.export_stl_chunks(mesh, planes, source_name)
@@ -145,7 +149,9 @@ class Slicer:
 
         chunk_label = "chunk" if len(chunks) == 1 else "chunks"
         progress(0.15, f"Prepared {len(chunks)} {chunk_label}")
-        gcode_paths = self.run_prusa_slicer(chunks, progress=progress)
+        gcode_paths = self.run_prusa_slicer(
+            chunks, progress=progress, config_path=config_path
+        )
 
         progress(0.9, "Generating transition check...")
         output_path = self.out_dir / f"{source_name}_debug.gcode"

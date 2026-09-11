@@ -73,11 +73,39 @@ integer to change that limit.
 1. Upload a model (`.stl`, `.3mf`, `.obj`, or `.ply`).
 2. Add one or more slice planes.
 3. Move or rotate planes with the viewport gizmo or GUI controls.
-4. Click **Slice**.
+4. Choose filament and print settings, then click **Slice**.
 5. The app switches to a preview shell showing the generated G-code path.
 6. Click **Back to Setup** to return to the model and plane controls.
 
 Sample models are available in `samples/`.
+
+## Filament and Slicing Settings
+
+The **Filament** panel offers PLA and PETG starting presets with editable nozzle
+and bed temperatures, including first-layer temperatures. Cooling, extrusion
+multiplier, and maximum volumetric flow use preset values.
+PLA preserves the existing defaults. PETG uses the Generic PETG values from
+PrusaSlicer's Creality profile (including its inherited cooling settings); adjust
+these starting values for your filament and machine. **Reset to Filament Preset**
+restores the selected material's values.
+
+**Print Settings** controls layer height, first-layer height, perimeter count, and
+infill percentage. The baseline 0.4 mm nozzle supports heights from 0.06 to 0.32 mm.
+At 100% infill, Pentos uses rectilinear instead of the baseline grid pattern.
+Speeds retain their baseline values. **Reset Print Settings** restores print
+defaults without changing the filament selection.
+
+Only the material, four temperatures, and four print settings are remembered in
+browser storage and included in exported `.pentos` projects. Material-specific
+constants are applied during slicing; fixed settings remain in `pentos_config.ini`.
+Loading a project restores its values. Settings edits require slicing
+again to update the preview. Controls are disabled while slicing.
+
+Each slice writes its own effective INI in the client's temporary session
+workspace. The repository's `pentos_config.ini` remains the baseline. Pentos
+preserves its firmware macros, relative extrusion, and chunk-specific overrides.
+The temporary INI is cleaned up with the session; browser storage and project
+files retain the settings. Arbitrary PrusaSlicer profile import is not supported.
 
 ## Machine Configuration
 
