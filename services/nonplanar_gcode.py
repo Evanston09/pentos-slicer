@@ -173,16 +173,14 @@ def _prepare_mapped_moves(
 ) -> dict[int, _MappedMoveProperties]:
     """Inverse-map moves and smooth normals within continuous motion paths."""
     prepared: dict[int, _MappedMoveProperties] = {}
-    groups: list[tuple[list[tuple[int, int]], bool]] = []
+    groups: list[list[tuple[int, int]]] = []
     current_group: list[tuple[int, int]] | None = None
-    reset_b_before_group = False
     layer_index = -1
 
     for index, line in enumerate(lines):
         parsed = GcodeCommand.parse(line)
         if parsed.comment == "LAYER_CHANGE":
             layer_index += 1
-            current_group = None
 
         move = moves.get(index)
         if layer_index < PLANAR_BASE_LAYERS:
@@ -219,7 +217,6 @@ def _prepare_mapped_moves(
             )
         except ValueError:
             current_group = None
-            reset_b_before_group = True
             continue
 
         blend = min(
@@ -241,15 +238,12 @@ def _prepare_mapped_moves(
 
         if current_group is None:
             current_group = []
-            groups.append((current_group, reset_b_before_group))
-            reset_b_before_group = False
+            groups.append(current_group)
         current_group.extend((index, segment) for segment in range(segment_count))
 
     previous_b = 0.0
     mapping_error = machine_config.max_normal_error_degrees / 2.0
-    for group, reset_b in groups:
-        if reset_b:
-            previous_b = 0.0
+    for group in groups:
         source_normals = np.asarray(
             [prepared[index].normals[segment] for index, segment in group]
         )
@@ -292,6 +286,7 @@ def map_gcode_to_original(
     mapped_lines = []
     layer_index = -1
     last_emitted_xyz: np.ndarray | None = None
+    last_emitted_ab = (0.0, 0.0)
 
     for index, line in enumerate(lines):
         parsed = GcodeCommand.parse(line)
@@ -312,6 +307,8 @@ def map_gcode_to_original(
                 last_emitted_xyz = move.end_xyz
             continue
 
+        if last_emitted_xyz is None:
+            last_emitted_xyz = move.start_xyz
         distance = float(np.linalg.norm(move.end_xyz - move.start_xyz))
         if move.extrusion_delta > 0.0 and move.is_absolute_extrusion:
             raise ValueError(
@@ -344,15 +341,18 @@ def map_gcode_to_original(
                 ]
             )
         else:
-            # Keep out-of-volume setup and skirt moves planar for preview.
-            mapped = np.asarray([move.end_xyz])
-            # Might be too agressive for travel moves in the future.
-            angles = [(0.0, 0.0)]
+            # Anchor unmapped travel to the last mapped point in the held bed pose.
+            mapped = np.asarray(
+                [
+                    last_emitted_xyz
+                    + rotation_matrix(*last_emitted_ab)
+                    @ (move.end_xyz - move.start_xyz)
+                ]
+            )
+            angles = [last_emitted_ab]
             extrusion_multipliers = np.ones(1)
             segment_count = 1
 
-        if last_emitted_xyz is None:
-            last_emitted_xyz = move.start_xyz
         mapped_starts = np.vstack((last_emitted_xyz, mapped[:-1]))
         mapped_lengths = np.linalg.norm(mapped - mapped_starts, axis=1)
         feedrates = (
@@ -382,6 +382,7 @@ def map_gcode_to_original(
                 + ending
             )
         last_emitted_xyz = mapped[-1]
+        last_emitted_ab = tuple(angles[-1])
 
     return "".join(mapped_lines)
 

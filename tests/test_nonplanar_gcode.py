@@ -310,3 +310,78 @@ def test_map_gcode_inverse_maps_and_compensates_extrusion() -> None:
         [[move.parsed.args["A"], move.parsed.args["B"]] for move in moves[-3:]],
         0.0,
     )
+
+
+def test_map_gcode_smooths_across_layer_change() -> None:
+    offset = np.asarray(DEFAULT_MACHINE_CONFIG.machine_offset)
+    start = offset + [0.0, 0.1, 0.1]
+    middle = offset + [0.2, 0.1, 0.1]
+    end = offset + [0.5, 0.1, 0.1]
+    prefix = (
+        "G90\nM83\n"
+        f"G1 X{start[0]} Y{start[1]} Z{start[2]} F600\n"
+        + ";LAYER_CHANGE\n" * 6
+        + f"G1 X{middle[0]} Y{middle[1]} Z{middle[2]} E0.2\n"
+    )
+    suffix = f"G1 X{end[0]} Y{end[1]} Z{end[2]} E0.3\n"
+    continuous = _mapped_ab_moves(
+        map_gcode_to_original(
+            prefix + suffix, _SpikedNormalVolume(), DEFAULT_MACHINE_CONFIG, 0.1
+        )
+    )
+    layered = _mapped_ab_moves(
+        map_gcode_to_original(
+            prefix + ";LAYER_CHANGE\n" + suffix,
+            _SpikedNormalVolume(),
+            DEFAULT_MACHINE_CONFIG,
+            0.1,
+        )
+    )
+    assert_allclose([m.end_ab for m in layered], [m.end_ab for m in continuous])
+    assert_allclose([m.end_xyz for m in layered], [m.end_xyz for m in continuous])
+
+
+def test_unmapped_travel_holds_pose_and_rotates_displacement() -> None:
+    class InterruptedVolume:
+        @staticmethod
+        def inverse_map_properties(points):
+            if np.any((points[:, 0] > 0.5) & (points[:, 0] < 0.9)):
+                raise ValueError("Outside volume")
+            normals = np.asarray(
+                [
+                    _commanded_normal(np.array([20.0, 60.0 if x <= 0.25 else 120.0]))
+                    for x in points[:, 0]
+                ]
+            )
+            return (
+                points + [0.0, 0.0, 2.0],
+                np.ones(len(points)),
+                normals,
+            )
+
+    offset = np.asarray(DEFAULT_MACHINE_CONFIG.machine_offset)
+    text = (
+        "G90\nM83\n"
+        f"G1 X{offset[0]} Y{offset[1]} Z{offset[2]} F600\n"
+        + ";LAYER_CHANGE\n" * 6
+        + f"G1 X{offset[0] + 0.25} E0.1\n"
+        + f"G1 X{offset[0] + 0.5} E0.1\n"
+        + f"G1 X{offset[0] + 0.7}\n"
+        + f"G1 X{offset[0] + 0.8} Z{offset[2] + 0.2}\n"
+        + f"G1 X{offset[0] + 1.0} E0.1\n"
+    )
+    moves = _mapped_ab_moves(
+        map_gcode_to_original(text, InterruptedVolume(), DEFAULT_MACHINE_CONFIG)
+    )[-4:]
+    assert moves[0].end_ab[1] > 90.0
+    for before, after, displacement in zip(
+        moves, moves[1:3], ([0.2, 0, 0], [0.1, 0, 0.2])
+    ):
+        assert_allclose(after.end_ab, before.end_ab)
+        assert_allclose(
+            after.end_xyz - before.end_xyz,
+            rotation_matrix(*before.end_ab) @ displacement,
+            atol=2e-5,
+        )
+    assert moves[-1].end_ab[1] > 90.0
+    assert abs(moves[-1].end_ab[1] - moves[0].end_ab[1]) < 5.0
