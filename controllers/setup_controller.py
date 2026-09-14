@@ -6,7 +6,13 @@ import numpy as np
 import trimesh
 
 from controllers.nonplanar_controller import NonplanarController, NonplanarViewPort
-from models import DEFAULT_MACHINE_CONFIG, AppState, MachineConfig, PlaneSnapshot
+from models import (
+    DEFAULT_MACHINE_CONFIG,
+    AppState,
+    MachineConfig,
+    PlaneSnapshot,
+    SlicingSettings,
+)
 from services.auto_planes import (
     AutoPlaneConfig,
     AutoPlaneSelector,
@@ -30,9 +36,12 @@ from services.nonplanar_gcode import map_gcode_to_original
 from services.project_io import load_scene, save_scene
 from services.session_workspace import SessionWorkspace
 from services.slicing import Slicer
+from services.slicing_config import write_slicing_config
 
 
 class SetupViewPort(NonplanarViewPort, Protocol):
+    def update_slicing_settings(self, settings: SlicingSettings) -> None: ...
+
     def mount(self, state: AppState) -> None: ...
 
     def unmount(self) -> None: ...
@@ -105,6 +114,9 @@ class SetupController:
         workspace: SessionWorkspace,
         slicing_slots: BoundedSemaphore,
         persist_machine_config: Callable[[MachineConfig], None],
+        persist_slicing_settings: Callable[[SlicingSettings], None] = lambda settings: (
+            None
+        ),
     ) -> None:
         self.state = state
         self.slicer = slicer
@@ -114,6 +126,8 @@ class SetupController:
         self.upload_dir = workspace.path / "uploads"
         self.slicing_slots = slicing_slots
         self.persist_machine_config = persist_machine_config
+        self.persist_slicing_settings = persist_slicing_settings
+        self.is_slicing = False
         self.overhang_threshold_degrees = AutoPlaneConfig().overhang_threshold_degrees
         self.next_plane_id = (
             max((plane.plane_id for plane in state.plane_snapshots), default=-1) + 1
@@ -331,13 +345,25 @@ class SetupController:
         self.view.set_status(f"Exported {filename}")
         return filename, scene_bytes
 
+    def set_slicing_settings(self, settings: SlicingSettings) -> None:
+        if self.is_slicing or settings == self.state.slicing_settings:
+            return
+        self.state.slicing_settings = settings
+        self.state.gcode_path = None
+        self.view.update_slicing_settings(settings)
+        self.persist_slicing_settings(settings)
+
     def slice_model(self) -> None:
+        if self.is_slicing:
+            return
         model = transformed_model(self.state)
         if model is None:
             self.view.set_status("Load a model before slicing")
             return
 
         mesh, source_name = model
+        settings = self.state.slicing_settings
+        self.is_slicing = True
         self.view.set_slice_enabled(False)
         self.view.set_slice_progress(0.0, "Preparing slice...")
         try:
@@ -346,6 +372,9 @@ class SetupController:
                     self.view.set_status("Server is busy slicing other models")
                     return
                 try:
+                    config_path = write_slicing_config(
+                        settings, self.workspace.path / "temp" / "slicing_config.ini"
+                    )
                     if self.state.slicing_mode == "nonplanar":
                         self.view.set_slice_progress(0.05, "Deforming model...")
                         deformed, volume, source_name = self.nonplanar.deformed_mesh()
@@ -353,6 +382,7 @@ class SetupController:
                             deformed,
                             [],
                             f"{source_name}_deformed",
+                            config_path=config_path,
                             progress=lambda value, message: (
                                 self.view.set_slice_progress(
                                     0.2 + 0.6 * value,
@@ -380,6 +410,7 @@ class SetupController:
                                 mesh,
                                 self.state.plane_snapshots,
                                 source_name,
+                                config_path=config_path,
                                 progress=self.view.set_slice_progress,
                             )
                         else:
@@ -387,6 +418,7 @@ class SetupController:
                                 mesh,
                                 self.state.plane_snapshots,
                                 source_name,
+                                config_path=config_path,
                                 progress=self.view.set_slice_progress,
                             )
                     self.view.set_slice_progress(1.0, "Opening preview...")
@@ -397,6 +429,7 @@ class SetupController:
             print(f"Failed to slice: {exc}")
             return
         finally:
+            self.is_slicing = False
             self.view.set_slice_enabled(True)
             self.view.set_slice_progress(None)
 
@@ -404,6 +437,9 @@ class SetupController:
         self.show_preview()
 
     def _load_scene_state(self, loaded_state: AppState) -> None:
+        self.state.slicing_settings = loaded_state.slicing_settings
+        self.view.update_slicing_settings(self.state.slicing_settings)
+        self.persist_slicing_settings(self.state.slicing_settings)
         self.state.current_model = loaded_state.current_model
         self.state.model_xy_position = loaded_state.model_xy_position
         self.state.model_z_degrees = loaded_state.model_z_degrees

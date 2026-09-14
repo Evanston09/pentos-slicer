@@ -4,7 +4,7 @@ import zipfile
 
 import trimesh
 
-from models import AppState, GuideSurfaceSnapshot, PlaneSnapshot
+from models import AppState, GuideSurfaceSnapshot, PlaneSnapshot, SlicingSettings
 from services.model_tools import source_name_from_filename, validate_mesh
 
 
@@ -23,11 +23,12 @@ def load_scene(content: bytes) -> AppState:
     mesh = trimesh.load_mesh(io.BytesIO(model_bytes), file_type="3mf")
     validate_mesh(mesh)
 
-    slicing_mode = manifest.get("slicing_mode", "multiplanar")
+    slicing_mode = manifest["slicing_mode"]
     if slicing_mode not in {"multiplanar", "nonplanar"}:
         raise ValueError(f"Unknown slicing mode: {slicing_mode}")
 
     return AppState(
+        slicing_settings=SlicingSettings.from_dict(manifest["slicing_settings"]),
         current_model=(
             mesh,
             source_name_from_filename(manifest["original_model_name"]),
@@ -40,7 +41,7 @@ def load_scene(content: bytes) -> AppState:
         ],
         guide_surfaces=[
             GuideSurfaceSnapshot.from_dict(snapshot, guide_id)
-            for guide_id, snapshot in enumerate(manifest.get("guide_surfaces", []))
+            for guide_id, snapshot in enumerate(manifest["guide_surfaces"])
         ],
         slicing_mode=slicing_mode,
         debug_mode=manifest["debug_mode"],
@@ -58,6 +59,7 @@ def save_scene(state: AppState) -> bytes:
     manifest = {
         "format": "pentos",
         "version": 3,
+        "slicing_settings": state.slicing_settings.as_dict(),
         "original_model_name": model_name,
         "model_xy_position": state.model_xy_position,
         "model_z_degrees": state.model_z_degrees,

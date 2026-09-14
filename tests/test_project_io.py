@@ -2,6 +2,7 @@ import io
 import json
 from pathlib import Path
 import zipfile
+from dataclasses import replace
 
 import numpy as np
 from numpy.testing import assert_allclose
@@ -10,6 +11,19 @@ import trimesh
 
 from models import AppState, GuideSurfaceSnapshot, PlaneSnapshot
 from services.project_io import load_scene, save_scene
+from models import PrintSettings, SlicingSettings
+from models.slicing_settings import filament_preset
+
+
+def test_scene_preserves_custom_slicing_settings() -> None:
+    state = AppState(
+        current_model=(trimesh.creation.box(), "box"),
+        slicing_settings=SlicingSettings(
+            filament=replace(filament_preset("PETG"), temperature=245),
+            print=PrintSettings(fill_density=30),
+        ),
+    )
+    assert load_scene(save_scene(state)).slicing_settings == state.slicing_settings
 
 
 def test_scene_round_trip_preserves_nonplanar_project() -> None:
@@ -103,3 +117,4 @@ def test_every_sample_scene_loads() -> None:
     for path in Path("samples").glob("*.pentos"):
         loaded = load_scene(path.read_bytes())
         assert loaded.current_model is not None, path
+        assert loaded.slicing_settings == SlicingSettings(), path

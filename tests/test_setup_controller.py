@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from pathlib import Path
 from threading import BoundedSemaphore
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
 import numpy as np
@@ -14,9 +15,14 @@ from models import AppState, GuideSurfaceSnapshot, MachineConfig
 from services.machine_config_io import save_machine_config
 from services.model_tools import transformed_model
 from services.project_io import load_scene, save_scene
+from models import SlicingSettings
+from models.slicing_settings import filament_preset
 
 
 class FakeSetupView:
+    def update_slicing_settings(self, settings) -> None:
+        self.slicing_settings = settings
+
     def __init__(self) -> None:
         self.statuses: list[str] = []
         self.slice_progress: list[tuple[float | None, str | None]] = []
@@ -110,14 +116,18 @@ class FakeSlicer:
         self.calls = []
         self.error: Exception | None = None
 
-    def slice(self, mesh, planes, source_name, *, progress) -> Path:
+    def slice(self, mesh, planes, source_name, *, progress, config_path) -> Path:
+        self.config_path = config_path
         if self.error is not None:
             raise self.error
         self.calls.append(("slice", mesh, list(planes), source_name))
         progress(0.5, "Slicing chunk 1 of 1...")
         return Path("output/model.gcode")
 
-    def debug_transition_check(self, mesh, planes, source_name, *, progress) -> Path:
+    def debug_transition_check(
+        self, mesh, planes, source_name, *, progress, config_path
+    ) -> Path:
+        self.config_path = config_path
         if self.error is not None:
             raise self.error
         self.calls.append(("debug", mesh, list(planes), source_name))
@@ -126,8 +136,9 @@ class FakeSlicer:
 
 
 class FakeWorkspace:
-    def __init__(self, path: Path = Path(".")) -> None:
-        self.path = path
+    def __init__(self, path: Path | None = None) -> None:
+        self.temp = TemporaryDirectory(prefix="pentos-test-") if path is None else None
+        self.path = Path(self.temp.name) if self.temp else path
 
     @contextmanager
     def active_job(self):
@@ -136,7 +147,7 @@ class FakeWorkspace:
 
 def make_controller(
     state: AppState | None = None,
-    workspace_path: Path = Path("."),
+    workspace_path: Path | None = None,
     slicer=None,
     slicing_slots=None,
     persist_machine_config=lambda config: None,
@@ -465,12 +476,59 @@ def test_slice_dispatches_normal_and_debug_modes() -> None:
     assert state.gcode_path == Path("output/model_debug.gcode")
     assert view.slice_progress[-1] == (None, None)
     assert (1.0, "Opening preview...") in view.slice_progress
+    assert (
+        slicer.config_path == controller.workspace.path / "temp" / "slicing_config.ini"
+    )
+    assert "temperature = 205\n" in slicer.config_path.read_text()
+
+
+def test_settings_edits_invalidate_output_and_restore_from_project() -> None:
+    state = AppState(current_model=(trimesh.creation.box(), "model"))
+    controller, view, _, _ = make_controller(state)
+    persisted = []
+    controller.persist_slicing_settings = persisted.append
+    settings = SlicingSettings(filament=filament_preset("PETG"))
+    state.gcode_path = Path("old.gcode")
+    controller.set_slicing_settings(settings)
+    assert state.gcode_path is None
+    assert state.slicing_settings == settings
+    assert view.slicing_settings == settings
+    assert persisted == [settings]
+    project = save_scene(state)
+    controller.set_slicing_settings(SlicingSettings())
+    controller.handle_upload("model.pentos", project)
+    assert state.slicing_settings == settings
+    assert view.slicing_settings == settings
+    assert persisted[-1] == settings
+
+
+def test_settings_snapshot_is_used_and_edits_are_ignored_during_slice(tmp_path) -> None:
+    settings = SlicingSettings(filament=filament_preset("PETG"))
+    state = AppState(
+        current_model=(trimesh.creation.box(), "model"),
+        slicing_settings=settings,
+    )
+    controller, _, slicer, _ = make_controller(state, workspace_path=tmp_path)
+    original_slice = slicer.slice
+
+    def slice_with_edit(*args, **kwargs):
+        controller.set_slicing_settings(SlicingSettings())
+        assert "temperature = 240\n" in kwargs["config_path"].read_text()
+        return original_slice(*args, **kwargs)
+
+    slicer.slice = slice_with_edit
+    controller.slice_model()
+    assert state.slicing_settings == settings
+    assert state.gcode_path is not None
+    assert not controller.is_slicing
 
 
 def test_nonplanar_slice_uses_deformed_mesh(tmp_path) -> None:
     class NonplanarFakeSlicer(FakeSlicer):
-        def slice(self, mesh, planes, source_name, *, progress) -> Path:
-            super().slice(mesh, planes, source_name, progress=progress)
+        def slice(self, mesh, planes, source_name, *, progress, config_path) -> Path:
+            super().slice(
+                mesh, planes, source_name, progress=progress, config_path=config_path
+            )
             path = tmp_path / f"{source_name}.gcode"
             path.write_text("G90\n")
             return path

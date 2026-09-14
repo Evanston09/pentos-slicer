@@ -12,9 +12,11 @@ from models import (
     GuideSurfaceSnapshot,
     MachineConfig,
     PlaneSnapshot,
+    SlicingSettings,
 )
 from views.guide_surface_editor_view import GuideSurfaceEditorView
 from views.plane_editor_view import PlaneEditorView
+from views.slicing_settings_view import SlicingSettingsView
 from views.theming import OVERHANG_RED, PENTOS_BLUE, add_build_plate_scene
 
 if TYPE_CHECKING:
@@ -68,6 +70,7 @@ class SetupView:
         self.client = client
         self.controller: SetupController
         self.controls: SetupControls | None = None
+        self.slicing_settings_view: SlicingSettingsView | None = None
         self.model_scene: ModelScene | None = None
         self.scalar_field_surface: viser.GlbHandle | None = None
         self.syncing_model_controls = False
@@ -115,6 +118,11 @@ class SetupView:
             )
             machine_reset = self.client.gui.add_button("Reset Machine Config")
 
+        self.slicing_settings_view = SlicingSettingsView(
+            self.client,
+            state.slicing_settings,
+            self.controller.set_slicing_settings,
+        )
         upload = self.client.gui.add_upload_button(
             "Upload Model/Scene",
             mime_type=".stl,.3mf,.obj,.ply,.pentos",
@@ -346,6 +354,8 @@ class SetupView:
             return
 
         controls = self.controls
+        self.slicing_settings_view.remove()
+        self.slicing_settings_view = None
         self.client.scene.remove_click_callback(self._handle_scene_click)
         self.armed_snap_target = None
         self.plane_editor.clear()
@@ -396,6 +406,10 @@ class SetupView:
 
     def set_slice_enabled(self, enabled: bool) -> None:
         self._mounted().slice_button.disabled = not enabled
+        self.slicing_settings_view.set_enabled(enabled)
+
+    def update_slicing_settings(self, settings: SlicingSettings) -> None:
+        self.slicing_settings_view.update(settings)
 
     def set_slicing_mode(self, mode: str) -> None:
         controls = self._mounted()

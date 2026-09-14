@@ -6,9 +6,10 @@ from threading import BoundedSemaphore
 import viser
 
 from controllers.app_controller import MACHINE_CONFIG_STORAGE_KEY, AppController
-from models import DEFAULT_MACHINE_CONFIG, MachineConfig
+from models import DEFAULT_MACHINE_CONFIG, MachineConfig, SlicingSettings
 from services.machine_config_io import load_machine_config
 from services.session_workspace import SessionWorkspace
+from services.slicing_config import SLICING_SETTINGS_STORAGE_KEY, load_slicing_settings
 from views.theming import add_build_plate_scene, configure_theme
 
 
@@ -46,6 +47,18 @@ def load_client_machine_config(client: viser.ClientHandle) -> MachineConfig:
         return DEFAULT_MACHINE_CONFIG
 
 
+def load_client_slicing_settings(client: viser.ClientHandle) -> SlicingSettings:
+    try:
+        value = client.local_storage.get_item(SLICING_SETTINGS_STORAGE_KEY)
+        return SlicingSettings() if value is None else load_slicing_settings(value)
+    except (RuntimeError, TimeoutError, ValueError) as exc:
+        client.local_storage.remove_item(SLICING_SETTINGS_STORAGE_KEY)
+        client.add_notification(
+            "Error", f"Failed to load saved slicing settings: {exc}"
+        )
+        return SlicingSettings()
+
+
 def register_client_sessions(
     server: viser.ViserServer,
 ) -> dict[int, ClientSession]:
@@ -55,11 +68,16 @@ def register_client_sessions(
     @server.on_client_connect
     async def _(client: viser.ClientHandle) -> None:
         configure_theme(client)
-        machine_config = await asyncio.to_thread(load_client_machine_config, client)
+        machine_config, slicing_settings = await asyncio.gather(
+            asyncio.to_thread(load_client_machine_config, client),
+            asyncio.to_thread(load_client_slicing_settings, client),
+        )
         add_build_plate_scene(client, machine_config)
         workspace = SessionWorkspace(client.client_id)
         try:
-            app = AppController(client, workspace, slicing_slots, machine_config)
+            app = AppController(
+                client, workspace, slicing_slots, machine_config, slicing_settings
+            )
         except Exception:
             workspace.close()
             raise

@@ -6,10 +6,12 @@ import trimesh
 from .guide_surface import GuideSurfaceSnapshot
 from .machine_config import MachineConfig
 from .plane import PlaneSnapshot
+from .slicing_settings import SlicingSettings
 
 
 @dataclass
 class AppState:
+    slicing_settings: SlicingSettings = field(default_factory=SlicingSettings)
     machine_config: MachineConfig = field(default_factory=MachineConfig)
     current_model: tuple[trimesh.Trimesh, str] | None = None
     model_xy_position: tuple[float, float] = (45.0, 45.0)
