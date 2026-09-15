@@ -9,6 +9,7 @@ from models import GuideSurfaceSnapshot
 from services.auto_planes import quaternion_from_z_to
 from services.volumetric_deformation import (
     TetrahedralVolume,
+    _guide_edge_intersections,
     _guide_constraints,
     _tetrahedron_determinants,
     solve_guide_deformation,
@@ -60,13 +61,13 @@ def guide(
     bend_x: float = 0.0,
     bend_y: float = 0.0,
 ) -> GuideSurfaceSnapshot:
-    return GuideSurfaceSnapshot(
+    surface = GuideSurfaceSnapshot(
         position=np.asarray(position, dtype=float),
         wxyz=quaternion_from_z_to(np.asarray(normal, dtype=float)),
         guide_id=guide_id,
-        bend_x=bend_x,
-        bend_y=bend_y,
     )
+    surface.apply_bend_preset(bend_x, bend_y)
+    return surface
 
 
 def test_guide_deformation_maps_guides_to_flat_heights() -> None:
@@ -143,7 +144,10 @@ def test_harmonic_field_derives_heights_and_normals_from_one_solution() -> None:
 
 
 def test_neighbour_smoothing_preserves_x_only_guide_field() -> None:
-    mesh = trimesh.creation.box(extents=[4.0, 3.0, 2.0]).subdivide()
+    # Resolve the curve in the fixture without forcing fine meshing for all models.
+    mesh = trimesh.creation.box(extents=[4.0, 3.0, 2.0])
+    for _ in range(3):
+        mesh = mesh.subdivide()
     volume = tetrahedralize(mesh)
     guides = [
         guide(0, [0.0, 0.0, -0.8], bend_x=0.05),
@@ -200,14 +204,9 @@ def test_neighbour_smoothing_preserves_x_only_guide_field() -> None:
     y_variation = np.degrees(np.arccos(np.clip(end_dot_products, -1.0, 1.0)))
     assert y_variation.max() < 1.2
 
+    edge_pairs = np.array(((0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)))
     edges = np.unique(
-        np.sort(
-            volume.tetrahedra[:, ([0, 0, 0, 1, 1, 2], [1, 2, 3, 2, 3, 3])].reshape(
-                -1, 2
-            ),
-            axis=1,
-        ),
-        axis=0,
+        np.sort(volume.tetrahedra[:, edge_pairs].reshape(-1, 2), axis=1), axis=0
     )
     constraints, targets = _guide_constraints(
         volume.original_vertices,
@@ -221,14 +220,93 @@ def test_neighbour_smoothing_preserves_x_only_guide_field() -> None:
     )
 
 
-def test_duplicate_guide_positions_are_rejected() -> None:
+def test_coincident_guides_are_rejected() -> None:
     volume = tetrahedralize(trimesh.creation.box())
 
-    with pytest.raises(ValueError, match="different positions"):
+    with pytest.raises(ValueError, match="touch, cross, or reverse order"):
         solve_guide_scalar_field(
             volume,
             [guide(0, [0.0, 0.0, 0.0]), guide(1, [0.0, 0.0, 0.0])],
         )
+
+
+def test_generic_edge_intersections_support_rotated_and_multiple_roots() -> None:
+    flat = guide(0, [0.0, 0.0, 0.0])
+    assert_allclose(
+        _guide_edge_intersections(
+            np.array([[0.0, 0.0, -1.0], [0.0, 0.0, 1.0]]), np.array([[0, 1]]), flat
+        ),
+        [[0.5]],
+    )
+    rotated = guide(1, [0.0, 0.0, 0.0], normal=[1.0, 0.0, 0.0])
+    assert_allclose(
+        _guide_edge_intersections(
+            np.array([[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]), np.array([[0, 1]]), rotated
+        ),
+        [[0.5]],
+    )
+
+    curved = GuideSurfaceSnapshot(
+        np.zeros(3), np.array([1.0, 0.0, 0.0, 0.0]), 2, np.array([6.0, 6.0])
+    )
+    curved.heights_mm[:] = np.array([-1.0, 1.0, -1.0, 1.0])
+    roots = _guide_edge_intersections(
+        np.array([[-3.0, 0.0, 0.0], [3.0, 0.0, 0.0]]), np.array([[0, 1]]), curved
+    )
+    assert len(roots[0]) == 3
+
+
+def test_generic_edge_intersection_merges_coincident_boundary_edge() -> None:
+    flat = guide(0, [0.0, 0.0, 0.0])
+
+    assert _guide_edge_intersections(
+        np.array([[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]), np.array([[0, 1]]), flat
+    ) == [[0.0, 1.0]]
+
+
+def test_guide_intersections_resolve_all_six_bicubic_crossings() -> None:
+    surface = GuideSurfaceSnapshot(
+        np.zeros(3), np.array([1, 0, 0, 0]), 0, np.array([2.0, 2.0])
+    )
+    x, y = surface.control_xy
+    x_roots = np.array([-0.7, 0.01, 0.6])
+    y_roots = np.array([-0.4, 0.02, 0.9])
+    surface.heights_mm = np.outer(
+        np.prod(y[:, None] - y_roots, axis=1),
+        np.prod(x[:, None] - x_roots, axis=1),
+    )
+
+    roots = _guide_edge_intersections(
+        np.array([[-1.0, -1.0, 0.0], [1.0, 1.0, 0.0]]),
+        np.array([[0, 1]]),
+        surface,
+    )
+
+    assert_allclose(roots[0], (np.sort(np.r_[x_roots, y_roots]) + 1) / 2, atol=1e-8)
+
+
+def test_guide_intersections_respect_finite_patch() -> None:
+    surface = GuideSurfaceSnapshot(
+        np.zeros(3), np.array([1, 0, 0, 0]), 0, np.array([2.0, 2.0])
+    )
+    vertices = np.array([[-2, 0, 0], [2, 0, 0], [2, 0, -1], [2, 0, 1]], dtype=float)
+
+    roots = _guide_edge_intersections(vertices, np.array([[0, 1], [2, 3]]), surface)
+
+    assert_allclose(roots[0], [0.25, 0.75])
+    assert roots[1] == []
+    with pytest.raises(ValueError, match="does not intersect"):
+        _guide_constraints(vertices, np.array([[2, 3]]), [surface], np.array([0.0]))
+
+
+def test_scalar_solver_uses_guide_list_order() -> None:
+    volume = tetrahedralize(trimesh.creation.box())
+
+    values = solve_guide_scalar_field(
+        volume, [guide(9, [0.0, 0.0, -0.5]), guide(2, [0.0, 0.0, 0.5])]
+    )
+
+    assert_allclose(values, volume.original_vertices[:, 2] + 0.5, atol=1e-8)
 
 
 def test_barycentric_mapping_round_trips_affine_deformation() -> None:
@@ -317,3 +395,61 @@ def test_tetrahedralize_rejects_open_mesh() -> None:
 
     with pytest.raises(ValueError, match="watertight"):
         tetrahedralize(open_mesh)
+
+
+def test_lateral_guide_translation_does_not_change_planar_layer_spacing() -> None:
+    volume = tetrahedralize(trimesh.creation.box())
+    surfaces = [guide(0, [-10.0, 0.0, -0.5]), guide(1, [12.0, 0.0, 0.5])]
+
+    values = solve_guide_scalar_field(volume, surfaces)
+
+    assert_allclose(values, volume.original_vertices[:, 2] + 0.5, atol=1e-8)
+
+
+def test_opposite_surface_normals_follow_guide_list_order() -> None:
+    volume = tetrahedralize(trimesh.creation.box())
+    surfaces = [
+        guide(0, [0.0, 0.0, -0.5], normal=[0.0, 0.0, -1.0]),
+        guide(1, [0.0, 0.0, 0.5]),
+    ]
+
+    solve_guide_deformation(volume, surfaces)
+
+    assert_allclose(
+        volume.scalar_values, volume.original_vertices[:, 2] + 0.5, atol=1e-8
+    )
+    assert_allclose(volume.layer_normals([[0, 0, 0]]), [[0, 0, 1]], atol=1e-8)
+
+
+def test_curved_targets_follow_local_normals_and_normal_separation() -> None:
+    from services.volumetric_deformation import _guide_field_targets
+
+    centers = np.array([[-1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    surfaces = [guide(0, [0, 0, -1], bend_x=0.4), guide(1, [0, 0, 1], bend_x=0.4)]
+    heights, normals = _guide_field_targets(centers, np.ones(3), surfaces)
+    expected = np.array([[0.8, 0, 1], [0, 0, 1], [-0.8, 0, 1]])
+    expected /= np.linalg.norm(expected, axis=1, keepdims=True)
+
+    assert_allclose(normals, expected, atol=1e-10)
+    assert_allclose(heights, [0, 2 * expected[:, 2].mean()], atol=1e-10)
+
+
+def test_crossing_guides_report_sampled_conflict() -> None:
+    volume = tetrahedralize(trimesh.creation.box(extents=[4, 4, 4]))
+    surfaces = [guide(0, [0, 0, 0]), guide(1, [0, 0, 0.1], normal=[1, 0, 1])]
+
+    with pytest.raises(ValueError, match="touch, cross, or reverse order"):
+        solve_guide_scalar_field(volume, surfaces)
+
+
+def test_fit_report_quantifies_inconsistent_edge_constraints() -> None:
+    import re
+
+    volume = tetrahedralize(trimesh.creation.box(extents=[2, 2, 2]))
+    surfaces = [guide(0, [0, 0, -0.6], bend_x=0.4), guide(1, [0, 0, 0.6], bend_x=0.4)]
+    solve_guide_scalar_field(volume, surfaces)
+
+    numbers = re.findall(r"RMS ([\d.]+), max ([\d.]+)", volume.guide_fit_summary)
+    assert len(numbers) == 2
+    assert all(0 < float(rms) <= float(maximum) for rms, maximum in numbers)
+    assert "flattened mm" in volume.guide_fit_summary

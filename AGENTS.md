@@ -111,3 +111,46 @@ the affected controls and setup-to-preview flow. For slicing changes, inspect
 the generated output when PrusaSlicer is available.
 
 Report what was verified and any checks that could not be completed.
+
+## Application and Persistence Context
+
+Each connected client has its own `AppState`, controllers, views, slicer, and
+temporary workspace. Only the slice semaphore is shared across clients. On
+disconnect, controller handles and workspace files must be cleaned up without
+affecting another session.
+
+The active `MachineConfig` is stored in browser local storage under
+`pentos-machine-config`. Machine profiles use the `pentos-machine` JSON format,
+currently version 1. Saved `.pentos` projects are ZIP archives containing
+`manifest.json` and `model.3mf`; new saves use manifest version 3 and include
+model placement, planes, guide surfaces, slicing mode, slicing settings, and
+debug mode. Runtime plane and guide IDs are reconstructed when loading and are
+not serialized.
+
+Keep model state independent of Viser handles. Controllers update canonical
+snapshots as edits occur; views render that state and forward callbacks;
+services do filesystem, subprocess, geometry, and G-code work. Preserve the
+import boundaries enforced by `tests/test_architecture.py`.
+
+## Slicing Pipeline Context
+
+For multiplanar slicing, planes decompose the transformed source mesh in list
+order. Non-base pieces are rotated about the configured local pivot, placed on
+the local PrusaSlicer bed, and assigned a temporary `flat_xy_offset`. During
+merge, Pentos applies the machine offset, removes `flat_xy_offset`, restores the
+piece's `z_offset`, and inserts a 15 mm relative Z lift before each A/B
+transition. The centering offset is never a physical machine target. Debug mode
+emits only the transition-check motion rather than a full print.
+
+For nonplanar slicing, at least two guide surfaces constrain a scalar field on a
+tetrahedral volume. The volume is flattened, its boundary is sliced once by
+PrusaSlicer, and moves after the first two planar layers are subdivided and
+inverse-mapped. Mapping blends in over four layers, adjusts extrusion and feed
+rate, smooths normals/A-B angles within the configured error, and compensates
+XYZ around the local rotation center before adding the machine offset. It
+requires relative extrusion for mapped positive-extrusion moves.
+
+Do not describe generated paths as collision-validated or generally
+machine-safe. Full collision, reachability, local layer-thickness, and angular
+limit validation remain future work. Treat real-machine testing as a deliberate
+hardware validation step.

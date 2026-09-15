@@ -1,5 +1,9 @@
 from .app_state import AppState
-from .guide_surface import GuideSurfaceSnapshot, guide_surface_mesh
+from .guide_surface import (
+    GUIDE_CONTROL_SIZE,
+    GUIDE_PREVIEW_SIZE,
+    GuideSurfaceSnapshot,
+)
 from .machine_config import DEFAULT_MACHINE_CONFIG, MachineConfig
 from .plane import PlaneSnapshot
 from .preview import GcodePreview, MachinePose, PreviewMove
@@ -11,11 +15,12 @@ __all__ = [
     "PrintSettings",
     "SlicingSettings",
     "GcodePreview",
+    "GUIDE_CONTROL_SIZE",
+    "GUIDE_PREVIEW_SIZE",
     "GuideSurfaceSnapshot",
     "MachineConfig",
     "MachinePose",
     "PreviewMove",
     "DEFAULT_MACHINE_CONFIG",
     "PlaneSnapshot",
-    "guide_surface_mesh",
 ]

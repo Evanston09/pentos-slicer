@@ -40,9 +40,9 @@ class PlaneEditorView:
         self.scene_prefix = scene_prefix
         self.planes: dict[int, PlaneState] = {}
 
-    def add_plane(self, plane: PlaneSnapshot) -> None:
+    def add_plane(self, plane: PlaneSnapshot, *, select: bool = True) -> None:
         plane_id = plane.plane_id
-        self.pose_editor.add(plane_id, plane.position, plane.wxyz)
+        self.pose_editor.add(plane_id, plane.position, plane.wxyz, select=select)
         half = PLANE_HALF_SIZE
         mesh = self.client.scene.add_mesh_simple(
             f"{self.scene_prefix}/{plane_id}/pose/mesh",
@@ -69,9 +69,24 @@ class PlaneEditorView:
         )
         self.planes[plane_id] = PlaneState(mesh, normal)
 
+        @mesh.on_click
+        def _(_) -> None:
+            self._toggle_select(plane_id)
+
+    def _toggle_select(self, plane_id: int) -> None:
+        if plane_id not in self.planes:
+            return
+        if self.pose_editor.selected_id == plane_id:
+            self.pose_editor.clear_selection()
+        else:
+            self.pose_editor.select(plane_id)
+
     def clear(self) -> None:
         for plane_id in list(self.planes):
-            self.remove_plane(plane_id)
+            state = self.planes.pop(plane_id)
+            state.normal.remove()
+            state.mesh.remove()
+        self.pose_editor.clear()
 
     def set_visible(self, visible: bool) -> None:
         self.pose_editor.set_visible(visible)
@@ -79,7 +94,7 @@ class PlaneEditorView:
     def replace_planes(self, planes: list[PlaneSnapshot]) -> None:
         self.clear()
         for plane in planes:
-            self.add_plane(plane)
+            self.add_plane(plane, select=False)
 
     def set_plane_pose(
         self,

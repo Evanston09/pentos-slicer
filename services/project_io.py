@@ -11,6 +11,13 @@ from services.model_tools import source_name_from_filename, validate_mesh
 def load_scene(content: bytes) -> AppState:
     with zipfile.ZipFile(io.BytesIO(content)) as zf:
         manifest = json.loads(zf.read("manifest.json"))
+        if manifest.get("format") != "pentos":
+            raise ValueError("Not a Pentos project")
+        version = manifest.get("version")
+        if version != 3:
+            raise ValueError(
+                f"Unsupported Pentos project version {version}; version 3 is required"
+            )
         model_bytes = zf.read("model.3mf")
 
     mesh = trimesh.load_mesh(io.BytesIO(model_bytes), file_type="3mf")
@@ -51,7 +58,7 @@ def save_scene(state: AppState) -> bytes:
 
     manifest = {
         "format": "pentos",
-        "version": 2,
+        "version": 3,
         "slicing_settings": state.slicing_settings.as_dict(),
         "original_model_name": model_name,
         "model_xy_position": state.model_xy_position,

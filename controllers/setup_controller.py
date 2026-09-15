@@ -398,7 +398,8 @@ class SetupController:
                             f"{source_name}_mapped.gcode"
                         )
                         output_path.write_text(
-                            map_gcode_to_original(
+                            f"; {volume.guide_fit_summary}\n"
+                            + map_gcode_to_original(
                                 planar_path.read_text(),
                                 volume,
                                 machine_config=self.state.machine_config,

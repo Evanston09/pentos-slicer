@@ -79,14 +79,17 @@ class SetupView:
             self.client,
             self._handle_plane_changed,
             self._handle_plane_deleted,
-            self._arm_plane_snap,
+            lambda plane_id: self._arm_snap("plane", plane_id),
             scene_prefix="/setup/planes",
         )
         self.guide_surface_editor = GuideSurfaceEditorView(
             self.client,
             self._handle_guide_surface_changed,
             self._handle_guide_surface_deleted,
-            self._arm_guide_surface_snap,
+            lambda guide_id: self._arm_snap("guide", guide_id),
+            lambda guide_id: self._arm_snap("guide_align", guide_id),
+            self._handle_guide_control_changed,
+            self._handle_guide_bend_applied,
             scene_prefix="/setup/guides",
         )
         self.armed_snap_target: tuple[str, int] | None = None
@@ -128,11 +131,6 @@ class SetupView:
             "Status",
             "No model loaded",
             disabled=True,
-        )
-        slice_progress = self.client.gui.add_progress_bar(
-            0.0,
-            visible=False,
-            animated=True,
         )
 
         model_folder = self.client.gui.add_folder(
@@ -224,6 +222,11 @@ class SetupView:
         slice_button = self.client.gui.add_button(
             "Slice",
             icon=viser.Icon.CLOUD_COMPUTING,
+        )
+        slice_progress = self.client.gui.add_progress_bar(
+            0.0,
+            visible=False,
+            animated=True,
         )
         controls = SetupControls(
             machine_folder=machine_folder,
@@ -625,23 +628,9 @@ class SetupView:
         self._disarm_snap(("guide", guide_id))
         self.guide_surface_editor.remove_guide(guide_id)
 
-    def set_guide_surface_pose(
-        self,
-        guide_id: int,
-        position: np.ndarray,
-        wxyz: np.ndarray,
-    ) -> None:
+    def update_guide_surface(self, guide: GuideSurfaceSnapshot) -> None:
         self._clear_scalar_field()
-        self.guide_surface_editor.set_guide_pose(guide_id, position, wxyz)
-
-    def set_guide_surface_mesh(
-        self,
-        guide_id: int,
-        vertices: np.ndarray,
-        faces: np.ndarray,
-    ) -> None:
-        self._clear_scalar_field()
-        self.guide_surface_editor.set_guide_mesh(guide_id, vertices, faces)
+        self.guide_surface_editor.update_guide(guide)
 
     def _sync_model_controls(
         self,
@@ -696,30 +685,37 @@ class SetupView:
         guide_id: int,
         position: np.ndarray,
         wxyz: np.ndarray,
-        bend_x: float,
-        bend_y: float,
     ) -> None:
-        self.controller.nonplanar.update_guide(guide_id, position, wxyz, bend_x, bend_y)
+        self.controller.nonplanar.update_guide(guide_id, position, wxyz)
+
+    def _handle_guide_control_changed(
+        self, guide_id: int, row: int, column: int, height: float, finished: bool
+    ) -> None:
+        self.controller.nonplanar.set_control_height(
+            guide_id, row, column, height, finished=finished
+        )
+
+    def _handle_guide_bend_applied(
+        self, guide_id: int, bend_x: float, bend_y: float
+    ) -> None:
+        self.controller.nonplanar.apply_bend(guide_id, bend_x, bend_y)
 
     def _handle_guide_surface_deleted(self, guide_id: int) -> None:
         self.controller.nonplanar.remove_guide(guide_id)
 
-    def _arm_plane_snap(self, plane_id: int) -> None:
-        self._arm_snap("plane", plane_id)
-
-    def _arm_guide_surface_snap(self, guide_id: int) -> None:
-        self._arm_snap("guide", guide_id)
-
     def _arm_snap(self, kind: str, item_id: int) -> None:
         self.client.scene.remove_click_callback(self._handle_scene_click)
-        self.client.scene.on_click()(self._handle_scene_click)
+        register_click_handler = self.client.scene.on_click()
+        register_click_handler(self._handle_scene_click)
         self.armed_snap_target = (kind, item_id)
+        self.guide_surface_editor.selection_enabled = False
         self.set_status(f"{kind.title()} {item_id}: click a model face to snap")
 
     def _disarm_snap(self, target: tuple[str, int]) -> None:
         if self.armed_snap_target == target:
             self.armed_snap_target = None
             self.client.scene.remove_click_callback(self._handle_scene_click)
+            self.guide_surface_editor.selection_enabled = True
 
     def _handle_scene_click(self, event) -> None:
         target = self.armed_snap_target
@@ -734,12 +730,18 @@ class SetupView:
                 ray_origin,
                 ray_direction,
             )
+        elif kind == "guide_align":
+            snapped = self.controller.nonplanar.align_guide_to_face(
+                item_id, ray_origin, ray_direction
+            )
         else:
             snapped = self.controller.nonplanar.snap_guide_to_face(
                 item_id, ray_origin, ray_direction
             )
         if not snapped:
             return
+        kind = "guide" if kind == "guide_align" else kind
         self.armed_snap_target = None
         self.client.scene.remove_click_callback(self._handle_scene_click)
+        self.guide_surface_editor.selection_enabled = True
         self.set_status(f"{kind.title()} {item_id} snapped to model face")

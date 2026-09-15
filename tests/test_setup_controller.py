@@ -13,7 +13,8 @@ import controllers.setup_controller as setup_controller_module
 from controllers.setup_controller import SetupController
 from models import AppState, GuideSurfaceSnapshot, MachineConfig
 from services.machine_config_io import save_machine_config
-from services.project_io import save_scene
+from services.model_tools import transformed_model
+from services.project_io import load_scene, save_scene
 from models import SlicingSettings
 from models.slicing_settings import filament_preset
 
@@ -103,11 +104,11 @@ class FakeSetupView:
     def remove_guide_surface(self, guide_id: int) -> None:
         self.guides = [guide for guide in self.guides if guide.guide_id != guide_id]
 
-    def set_guide_surface_pose(self, guide_id, position, wxyz) -> None:
-        pass
-
-    def set_guide_surface_mesh(self, guide_id, vertices, faces) -> None:
-        pass
+    def update_guide_surface(self, guide) -> None:
+        self.guides = [
+            guide if previous.guide_id == guide.guide_id else previous
+            for previous in self.guides
+        ]
 
 
 class FakeSlicer:
@@ -326,7 +327,122 @@ def test_added_guides_default_to_parallel_ordered_surfaces() -> None:
     first, second = controller.state.guide_surfaces
     assert second.position[2] > first.position[2]
     assert_allclose(second.wxyz, first.wxyz)
+    assert_allclose(first.size_mm, [100.0, 100.0])
+    assert_allclose(second.size_mm, first.size_mm)
+    assert_allclose(second.heights_mm, first.heights_mm)
     assert not any("cross" in status for status in view.statuses)
+
+
+def test_guides_retain_edits_when_snapped() -> None:
+    state = AppState(current_model=(trimesh.creation.box(), "box"))
+    controller, _, _, _ = make_controller(state)
+    controller.nonplanar.add_guide()
+    controller.nonplanar.add_guide()
+    first, _second = state.guide_surfaces
+
+    controller.nonplanar.set_control_height(first.guide_id, 0, 0, 3.0)
+    edited = first.heights_mm.copy()
+    controller.nonplanar.snap_guide_to_face(
+        first.guide_id, np.array([0.0, 0.0, 2.0]), np.array([0.0, 0.0, -1.0])
+    )
+    assert_allclose(first.heights_mm, edited)
+
+
+def test_align_guide_conforms_to_curved_face() -> None:
+    state = AppState(current_model=(trimesh.creation.icosphere(radius=5.0), "sphere"))
+    controller, _, _, _ = make_controller(state)
+    controller.nonplanar.add_guide()
+    guide = state.guide_surfaces[0]
+    # Keep the accuracy check inside the selected cap; the patch corners of a
+    # 6 mm square lie outside the region within 45 degrees of the clicked normal.
+    guide.size_mm = np.array([4.0, 4.0])
+
+    snapped = controller.nonplanar.align_guide_to_face(
+        guide.guide_id, np.array([45.0, 45.0, 10.0]), np.array([0.0, 0.0, -1.0])
+    )
+    assert snapped
+    hit_mesh = transformed_model(state)[0]
+    surface, _, _ = hit_mesh.nearest.on_surface([guide.position])
+    assert_allclose(guide.position, surface[0], atol=1e-6)
+
+    center_height = guide.evaluate_local(np.zeros((1, 2)))[0][0]
+    world_center = guide.position + center_height * guide.rotation[:, 2]
+    assert_allclose(world_center, guide.position, atol=1e-6)
+    assert np.ptp(guide.heights_mm) > 0.0, "align should warp heights to curvature"
+
+    tangent = guide.rotation[:, 2]
+    half = guide.size_mm / 2.0
+    x = np.linspace(-half[0], half[0], 9)
+    y = np.linspace(-half[1], half[1], 9)
+    grid_x, grid_y = np.meshgrid(x, y)
+    local_xy = np.column_stack((grid_x.ravel(), grid_y.ravel()))
+    heights, _, _ = guide.evaluate_local(local_xy)
+    world = (
+        guide.position + local_xy @ guide.rotation[:, :2].T + heights[:, None] * tangent
+    )
+    surface, _, _ = transformed_model(state)[0].nearest.on_surface(world)
+    assert np.max(np.linalg.norm(world - surface, axis=1)) < 0.1
+
+
+def test_align_guide_to_flat_face_keeps_flat() -> None:
+    state = AppState(current_model=(trimesh.creation.box(), "box"))
+    controller, _, _, _ = make_controller(state)
+    controller.nonplanar.add_guide()
+    guide = state.guide_surfaces[0]
+
+    snapped = controller.nonplanar.align_guide_to_face(
+        guide.guide_id, np.array([45.3, 45.2, 2.0]), np.array([0.0, 0.0, -1.0])
+    )
+    assert snapped
+    box_mesh = transformed_model(state)[0]
+    expected_center = box_mesh.bounds.mean(axis=0)
+    expected_center[2] = box_mesh.bounds[1, 2]
+    assert_allclose(guide.position, expected_center)
+    assert_allclose(guide.heights_mm, np.zeros((4, 4)), atol=1e-6)
+
+
+def test_guide_fit_heights_reproduces_bicubic_field() -> None:
+    guide = GuideSurfaceSnapshot(np.zeros(3), np.array([1.0, 0.0, 0.0, 0.0]), 0)
+    heights = np.array(
+        [
+            [0.0, 1.0, 2.0, 1.0],
+            [1.0, 2.0, 3.0, 2.0],
+            [2.0, 3.0, 4.0, 3.0],
+            [1.0, 2.0, 3.0, 2.0],
+        ]
+    )
+    guide.heights_mm = heights
+
+    x = np.linspace(-guide.size_mm[0] / 2.0, guide.size_mm[0] / 2.0, 9)
+    y = np.linspace(-guide.size_mm[1] / 2.0, guide.size_mm[1] / 2.0, 9)
+    grid_x, grid_y = np.meshgrid(x, y)
+    xy = np.column_stack((grid_x.ravel(), grid_y.ravel()))
+    values, _, _ = guide.evaluate_local(xy)
+    fitted = guide.fit_heights(xy, values)
+
+    assert_allclose(fitted, heights, atol=1e-6)
+
+
+def test_align_guide_conforms_to_parabolic_top() -> None:
+    content = Path("samples/flat_base_curved_top.pentos").read_bytes()
+    state = load_scene(content)
+    controller, _, _, _ = make_controller(state)
+    controller.nonplanar.add_guide()
+    guide = state.guide_surfaces[-1]
+
+    snapped = controller.nonplanar.align_guide_to_face(
+        guide.guide_id, np.array([45.0, 45.0, 20.0]), np.array([0.0, 0.0, -1.0])
+    )
+    assert snapped
+    assert np.min(guide.heights_mm) < -1.0, "guide should conform to the dome"
+
+    curvature = 0.0025
+    expected_columns = (
+        -curvature
+        * np.linspace(-guide.size_mm[0] / 2.0, guide.size_mm[0] / 2.0, 4) ** 2
+    )
+    for row in guide.heights_mm:
+        assert_allclose(row, expected_columns, atol=0.1)
 
 
 def test_scalar_field_surface_colors_tetrahedral_boundary() -> None:
@@ -435,6 +551,9 @@ def test_nonplanar_slice_uses_deformed_mesh(tmp_path) -> None:
     assert source_name == "model_deformed"
     assert view.slicing_mode == "nonplanar"
     assert controller.state.gcode_path == tmp_path / "model_mapped.gcode"
+    assert controller.state.gcode_path.read_text().startswith(
+        "; Guide fit error (flattened mm):"
+    )
     assert navigations == ["preview"]
     assert (0.05, "Deforming model...") in view.slice_progress
     assert (0.85, "Inverse-mapping G-code...") in view.slice_progress
@@ -507,3 +626,23 @@ def test_export_returns_scene_filename_and_bytes() -> None:
     assert filename == "model.pentos"
     assert content.startswith(b"PK")
     assert view.statuses[-1] == "Exported model.pentos"
+
+
+def test_failed_alignment_preserves_guide_and_reports_reason(monkeypatch) -> None:
+    state = AppState(current_model=(trimesh.creation.box(), "box"))
+    controller, view, _, _ = make_controller(state)
+    controller.nonplanar.add_guide()
+    guide = state.guide_surfaces[0]
+    guide.apply_bend_preset(0.1, 0.2)
+    before = guide.as_dict()
+
+    def failed_fit(self, xy, heights):
+        raise ValueError("Surface samples do not determine a full 4x4 guide fit")
+
+    monkeypatch.setattr(GuideSurfaceSnapshot, "fit_heights", failed_fit)
+    assert not controller.nonplanar.align_guide_to_face(
+        guide.guide_id, np.array([45.3, 45.2, 2.0]), np.array([0.0, 0.0, -1.0])
+    )
+    assert guide.as_dict() == before
+    assert "alignment failed" in view.statuses[-1]
+    assert "full 4x4 guide fit" in view.statuses[-1]
