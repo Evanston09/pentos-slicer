@@ -220,10 +220,10 @@ def test_neighbour_smoothing_preserves_x_only_guide_field() -> None:
     )
 
 
-def test_duplicate_guide_positions_are_rejected() -> None:
+def test_coincident_guides_are_rejected() -> None:
     volume = tetrahedralize(trimesh.creation.box())
 
-    with pytest.raises(ValueError, match="different positions"):
+    with pytest.raises(ValueError, match="touch, cross, or reverse order"):
         solve_guide_scalar_field(
             volume,
             [guide(0, [0.0, 0.0, 0.0]), guide(1, [0.0, 0.0, 0.0])],
@@ -395,3 +395,61 @@ def test_tetrahedralize_rejects_open_mesh() -> None:
 
     with pytest.raises(ValueError, match="watertight"):
         tetrahedralize(open_mesh)
+
+
+def test_lateral_guide_translation_does_not_change_planar_layer_spacing() -> None:
+    volume = tetrahedralize(trimesh.creation.box())
+    surfaces = [guide(0, [-10.0, 0.0, -0.5]), guide(1, [12.0, 0.0, 0.5])]
+
+    values = solve_guide_scalar_field(volume, surfaces)
+
+    assert_allclose(values, volume.original_vertices[:, 2] + 0.5, atol=1e-8)
+
+
+def test_opposite_surface_normals_follow_guide_list_order() -> None:
+    volume = tetrahedralize(trimesh.creation.box())
+    surfaces = [
+        guide(0, [0.0, 0.0, -0.5], normal=[0.0, 0.0, -1.0]),
+        guide(1, [0.0, 0.0, 0.5]),
+    ]
+
+    solve_guide_deformation(volume, surfaces)
+
+    assert_allclose(
+        volume.scalar_values, volume.original_vertices[:, 2] + 0.5, atol=1e-8
+    )
+    assert_allclose(volume.layer_normals([[0, 0, 0]]), [[0, 0, 1]], atol=1e-8)
+
+
+def test_curved_targets_follow_local_normals_and_normal_separation() -> None:
+    from services.volumetric_deformation import _guide_field_targets
+
+    centers = np.array([[-1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    surfaces = [guide(0, [0, 0, -1], bend_x=0.4), guide(1, [0, 0, 1], bend_x=0.4)]
+    heights, normals = _guide_field_targets(centers, np.ones(3), surfaces)
+    expected = np.array([[0.8, 0, 1], [0, 0, 1], [-0.8, 0, 1]])
+    expected /= np.linalg.norm(expected, axis=1, keepdims=True)
+
+    assert_allclose(normals, expected, atol=1e-10)
+    assert_allclose(heights, [0, 2 * expected[:, 2].mean()], atol=1e-10)
+
+
+def test_crossing_guides_report_sampled_conflict() -> None:
+    volume = tetrahedralize(trimesh.creation.box(extents=[4, 4, 4]))
+    surfaces = [guide(0, [0, 0, 0]), guide(1, [0, 0, 0.1], normal=[1, 0, 1])]
+
+    with pytest.raises(ValueError, match="touch, cross, or reverse order"):
+        solve_guide_scalar_field(volume, surfaces)
+
+
+def test_fit_report_quantifies_inconsistent_edge_constraints() -> None:
+    import re
+
+    volume = tetrahedralize(trimesh.creation.box(extents=[2, 2, 2]))
+    surfaces = [guide(0, [0, 0, -0.6], bend_x=0.4), guide(1, [0, 0, 0.6], bend_x=0.4)]
+    solve_guide_scalar_field(volume, surfaces)
+
+    numbers = re.findall(r"RMS ([\d.]+), max ([\d.]+)", volume.guide_fit_summary)
+    assert len(numbers) == 2
+    assert all(0 < float(rms) <= float(maximum) for rms, maximum in numbers)
+    assert "flattened mm" in volume.guide_fit_summary

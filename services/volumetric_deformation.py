@@ -40,6 +40,7 @@ class TetrahedralVolume:
     tetrahedra: np.ndarray
     boundary_faces: np.ndarray
     scalar_values: np.ndarray | None = None
+    guide_fit_summary: str = field(default="", init=False)
     _original_locator: _TetrahedronLocator | None = field(
         default=None, init=False, repr=False
     )
@@ -277,11 +278,18 @@ def solve_guide_scalar_field(
     if len(guides) < 2:
         raise ValueError("Add at least two guides to define the flattened layer range")
 
-    positions = np.asarray([guide.position for guide in guides])
-    segment_lengths = np.linalg.norm(np.diff(positions, axis=0), axis=1)
-    if np.any(np.isclose(segment_lengths, 0.0)):
-        raise ValueError("Adjacent guides must have different positions")
-    guide_heights = np.concatenate(([0.0], np.cumsum(segment_lengths)))
+    volume.guide_fit_summary = ""
+    volume.scalar_values = None
+    volume._layer_vertex_gradients = None
+    points = volume.original_vertices[volume.tetrahedra]
+    centers = points.mean(axis=1)
+    tetrahedron_volumes = (
+        np.abs(_tetrahedron_determinants(volume.original_vertices, volume.tetrahedra))
+        / 6.0
+    )
+    guide_heights, preferred_gradients = _guide_field_targets(
+        centers, tetrahedron_volumes, guides
+    )
 
     edge_pairs = np.array(((0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)))
     edges = np.unique(
@@ -294,7 +302,6 @@ def solve_guide_scalar_field(
         guide_heights,
     )
 
-    points = volume.original_vertices[volume.tetrahedra]
     edge_matrices = np.stack(
         (
             points[:, 1] - points[:, 0],
@@ -308,7 +315,6 @@ def solve_guide_scalar_field(
         (-inverse_edges.sum(axis=1, keepdims=True), inverse_edges),
         axis=1,
     )
-    tetrahedron_volumes = np.abs(np.linalg.det(edge_matrices)) / 6.0
     preferred_weights = np.sqrt(tetrahedron_volumes)
     rows = np.repeat(np.arange(len(volume.tetrahedra) * 3), 4)
     columns = np.tile(volume.tetrahedra, (1, 3)).ravel()
@@ -353,7 +359,6 @@ def solve_guide_scalar_field(
         ),
         axis=1,
     )
-    centers = points.mean(axis=1)
     center_distances = np.linalg.norm(
         centers[neighbours[:, 0]] - centers[neighbours[:, 1]],
         axis=1,
@@ -391,12 +396,7 @@ def solve_guide_scalar_field(
         shape=(len(neighbours) * 3, len(volume.original_vertices)),
     ).tocsr()
 
-    guide_normals = np.asarray(
-        [tf.quaternion_matrix(guide.wxyz)[:3, 2] for guide in guides]
-    )
-    preferred_gradient = guide_normals.mean(axis=0)
-    preferred_gradient /= np.linalg.norm(preferred_gradient)
-    smoothness_targets = (preferred_weights[:, None] * preferred_gradient).ravel()
+    smoothness_targets = (preferred_weights[:, None] * preferred_gradients).ravel()
 
     constraint_weight = 100.0
     system = vstack(
@@ -410,12 +410,28 @@ def solve_guide_scalar_field(
             targets * constraint_weight,
         )
     )
-    scalar_values = lsqr(
-        system,
+    column_scale = 1.0 / np.sqrt(np.asarray(system.power(2).sum(axis=0)).ravel())
+    solution = lsqr(
+        system.multiply(column_scale).tocsr(),
         right_hand_side,
         atol=1e-12,
         btol=1e-12,
-    )[0]
+        iter_lim=10 * system.shape[1],
+    )
+    if solution[1] not in {0, 1, 2, 4, 5}:
+        raise ValueError(
+            "Guide field solve did not converge; simplify guides or refine the mesh"
+        )
+    scalar_values = solution[0] * column_scale
+    residuals = constraints @ scalar_values - targets
+    reports = []
+    for guide, height in zip(guides, guide_heights):
+        errors = residuals[targets == height]
+        reports.append(
+            f"guide {guide.guide_id}: RMS {np.sqrt(np.mean(errors**2)):.4f}, "
+            f"max {np.max(np.abs(errors)):.4f}"
+        )
+    volume.guide_fit_summary = "Guide fit error (flattened mm): " + "; ".join(reports)
     volume.scalar_values = scalar_values
     volume._layer_vertex_gradients = None
 
@@ -423,6 +439,70 @@ def solve_guide_scalar_field(
     if np.any(gradient_lengths < 1e-8):
         raise ValueError("Guide field contains a zero-gradient region")
     return scalar_values
+
+
+def _guide_field_targets(
+    centers: np.ndarray,
+    cell_volumes: np.ndarray,
+    guides: list[GuideSurfaceSnapshot],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Sample finite patches over the volume to estimate spacing and directions.
+
+    Projection is along each guide's local Z, not a closest-point solve. Clamping
+    prevents polynomial extrapolation beyond the editable patch. Spacing is a
+    volume-weighted mean normal separation over overlapping sampled footprints;
+    it defines a global flattened interval, not a local layer-thickness guarantee.
+    """
+    surfaces, normals, footprints = [], [], []
+    for guide in guides:
+        local = (centers - guide.position) @ guide.rotation
+        half = guide.size_mm / 2.0
+        footprints.append(np.all(np.abs(local[:, :2]) <= half + 1e-9, axis=1))
+        xy = np.clip(local[:, :2], -half, half)
+        height, _, _ = guide.evaluate_local(xy)
+        surfaces.append(
+            np.column_stack((xy, height)) @ guide.rotation.T + guide.position
+        )
+        normals.append(guide.world_normal(xy))
+    surfaces = np.asarray(surfaces)
+    normals = np.asarray(normals)
+    # The list defines increasing layer order, including guides snapped to
+    # oppositely facing outer surfaces. Orient each sheet consistently with it.
+    differences = np.diff(surfaces, axis=0)
+    for i in range(len(guides)):
+        direction = differences[min(i, len(differences) - 1)]
+        if np.average(np.sum(normals[i] * direction, axis=1), weights=cell_volumes) < 0:
+            normals[i] *= -1
+
+    intervals = []
+    for i, difference in enumerate(differences):
+        overlap = footprints[i] & footprints[i + 1]
+        label = f"Guides {guides[i].guide_id} and {guides[i + 1].guide_id}"
+        if not np.any(overlap):
+            raise ValueError(
+                f"{label} have no sampled footprint overlap in the model; enlarge the patches or refine the mesh"
+            )
+        direction = normals[i, overlap] + normals[i + 1, overlap]
+        lengths = np.linalg.norm(direction, axis=1)
+        if np.any(lengths < 1e-8):
+            raise ValueError(f"{label} have conflicting print directions")
+        separation = np.sum(difference[overlap] * direction / lengths[:, None], axis=1)
+        if np.any(separation <= 1e-8):
+            raise ValueError(
+                f"{label} touch, cross, or reverse order at sampled model locations; separate the surfaces"
+            )
+        intervals.append(np.average(separation, weights=cell_volumes[overlap]))
+
+    distances_squared = np.sum((surfaces - centers[None]) ** 2, axis=2)
+    # One cell length regularizes the blend near a guide without a model-scale
+    # dependent constant or a singular weight on the sheet itself.
+    weights = 1.0 / (distances_squared + np.cbrt(cell_volumes)[None] ** 2)
+    preferred = np.sum(normals * weights[:, :, None], axis=0)
+    lengths = np.linalg.norm(preferred, axis=1)
+    if np.any(lengths < 1e-8 * weights.sum(axis=0)):
+        raise ValueError("Guide normals cancel inside the model")
+    preferred /= lengths[:, None]
+    return np.r_[0.0, np.cumsum(intervals)], preferred
 
 
 def solve_guide_deformation(

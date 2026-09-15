@@ -103,6 +103,21 @@ then inverse-maps them through the deformation. The mapper compensates XYZ for
 the bed pivot, adjusts extrusion and feed rate, and smooths A/B orientation
 within the configured normal-error limit.
 
+The field solver blends local curved-guide normals near each tetrahedron. Guide
+list order defines increasing layer values; adjacent intervals use the mean
+normal separation of the surfaces, weighted by model volume, rather than the
+distance between guide origins. Adjacent guide footprints must overlap at sampled
+model locations; enlarge the patches or refine the input mesh if they do not.
+Detected touching, crossing, or reversed ordering at those samples stops the solve.
+These samples do not establish that guides are disjoint everywhere.
+
+Generated G-code includes a comment reporting RMS and maximum guide fit error in
+**flattened millimeters**, measured at guide/volume-edge intersections. It measures
+how closely the solved field follows
+the guide constraints, not physical layer thickness or error everywhere on a guide.
+A coarse tetrahedral mesh can miss curvature; inspect the field and consider a
+finer input mesh or simpler guides when errors are large.
+
 The first two layers remain planar and the mapping blends in over the following
 four layers. This workflow requires a closed, tetrahedralizable mesh and at
 least two guide surfaces.

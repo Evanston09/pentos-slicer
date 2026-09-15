@@ -86,3 +86,16 @@ def test_download_failure_reports_error(tmp_path) -> None:
 
     assert download is None
     assert view.statuses[-1].startswith("Failed to download G-code:")
+
+
+def test_preview_keeps_fit_diagnostics_out_of_status(tmp_path) -> None:
+    report = "Guide fit error (flattened mm): guide 7: RMS 0.0123, max 0.0456"
+    path = tmp_path / "mapped.gcode"
+    path.write_text(f"; {report}\nG90\nM83\nG1 X68 Y7 Z1\nG1 X69 Y7 Z1 E0.5\n")
+    view = FakePreviewView()
+    controller = PreviewController(AppState(gcode_path=path), view, lambda: None)
+
+    controller.load_preview()
+
+    assert all("Guide fit error" not in status for status in view.statuses)
+    assert view.preview is not None

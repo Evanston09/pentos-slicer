@@ -551,6 +551,9 @@ def test_nonplanar_slice_uses_deformed_mesh(tmp_path) -> None:
     assert source_name == "model_deformed"
     assert view.slicing_mode == "nonplanar"
     assert controller.state.gcode_path == tmp_path / "model_mapped.gcode"
+    assert controller.state.gcode_path.read_text().startswith(
+        "; Guide fit error (flattened mm):"
+    )
     assert navigations == ["preview"]
     assert (0.05, "Deforming model...") in view.slice_progress
     assert (0.85, "Inverse-mapping G-code...") in view.slice_progress
