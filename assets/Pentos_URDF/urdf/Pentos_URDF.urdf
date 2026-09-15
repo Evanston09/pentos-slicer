@@ -88,7 +88,7 @@
     name="z_joint"
     type="prismatic">
     <origin
-      xyz="0.166342895629293 -0.0507916014864869 0.203286678805914"
+      xyz="0.166342895629293 -0.0507916014864869 0.2027928996728885"
       rpy="0 0 3.14159265358979" />
     <parent
       link="base_link" />
@@ -97,8 +97,8 @@
     <axis
       xyz="0 0 1" />
     <limit
-      lower="0"
-      upper="0.19"
+      lower="0.0004937791330254793"
+      upper="0.1904937791330255"
       effort="100"
       velocity="0.02" />
   </joint>
@@ -146,7 +146,7 @@
     name="x_joint"
     type="prismatic">
     <origin
-      xyz="0.281542895629293 0.012908398513512 -0.0342499999998885"
+      xyz="0.1661377755707842 0.012908398513512 -0.0342499999998885"
       rpy="0 0 0" />
     <parent
       link="z_gantry_link" />
@@ -155,8 +155,8 @@
     <axis
       xyz="-1 0 0" />
     <limit
-      lower="0"
-      upper="0.22"
+      lower="-0.1154051200585088"
+      upper="0.1045948799414912"
       effort="100"
       velocity="0.1" />
   </joint>
@@ -204,7 +204,7 @@
     name="y_joint"
     type="prismatic">
     <origin
-      xyz="3.33215954637254E-05 -0.0257794816606062 0.16840013399872"
+      xyz="3.33215954637254e-05 -0.063699999999997 0.16840013399872"
       rpy="0 0 0" />
     <parent
       link="base_link" />
@@ -213,8 +213,8 @@
     <axis
       xyz="0 -1 0" />
     <limit
-      lower="0"
-      upper="0.15"
+      lower="-0.03792051833939079"
+      upper="0.1120794816606092"
       effort="100"
       velocity="0.1" />
   </joint>
@@ -327,11 +327,26 @@
     <child
       link="b_rotary_link" />
     <axis
-      xyz="0.00321170129672137 0 -0.99999484247409" />
+      xyz="0 0 -1" />
     <limit
       lower="-3.14159"
       upper="3.14159"
       effort="10"
       velocity="1" />
+  </joint>
+  <!-- Reference point for preview alignment; coordinates are in meters. -->
+  <link name="nozzle_tip" />
+  <joint name="nozzle_tip_joint" type="fixed">
+    <parent link="x_carriage_link" />
+    <child link="nozzle_tip" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+  </joint>
+
+  <!-- Reference point for preview alignment; coordinates are in meters. -->
+  <link name="plate_center" />
+  <joint name="plate_center_joint" type="fixed">
+    <parent link="b_rotary_link" />
+    <child link="plate_center" />
+    <origin xyz="0 0 0.05363390981229364" rpy="0 0 0" />
   </joint>
 </robot>

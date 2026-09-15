@@ -179,6 +179,16 @@ fields use real machine coordinates; Pentos derives the local plate center,
 machine offset, and local A/B pivot from them. PrusaSlicer settings remain in
 `pentos_config.ini`.
 
+The preview printer uses the ideal joint origins and axes in
+`assets/Pentos_URDF/urdf/Pentos_URDF.urdf`. Its bed and displayed toolpath follow
+that URDF directly. Fixed `nozzle_tip` and `plate_center` reference links define
+preview alignment. At zero XYZ, the nozzle is centered on the plate; XYZ joint
+origins and limits encode this reference position. Machine profiles do not
+reshape or recalibrate the CAD model.
+`rotation_center_machine_mm` remains the real-machine calibration used for
+slicing and interpreting generated G-code. Consequently, simulation illustrates
+the ideal mechanism rather than verifying real-machine pivot compensation.
+
 ## Project Layout
 
 - `main.py` creates the Viser server and one isolated application session per

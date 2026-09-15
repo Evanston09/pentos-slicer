@@ -14,6 +14,7 @@ dependencies = [
     "triangle>=20250106",
     "trimesh[recommend]>=4.12.2",
     "viser @ git+https://github.com/Evanston09/viser.git@local-storage",
+    "yourdfpy>=0.0.60",
 ]
 
 [dependency-groups]

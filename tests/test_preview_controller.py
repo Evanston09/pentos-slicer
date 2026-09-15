@@ -21,8 +21,9 @@ class FakePreviewView:
     def set_estimated_time(self, estimate: str) -> None:
         self.estimated_time = estimate
 
-    def show_preview(self, preview) -> None:
+    def show_preview(self, preview, machine_config) -> None:
         self.preview = preview
+        self.machine_config = machine_config
 
 
 def test_missing_gcode_sets_status() -> None:
@@ -49,8 +50,8 @@ def test_load_preview_reads_and_parses_gcode(tmp_path) -> None:
 
     controller.load_preview()
 
+    assert view.machine_config is controller.state.machine_config
     assert view.preview is not None
-    assert len(view.preview.parts) == 1
     assert view.statuses[-1].startswith("Preview: 1 parts")
     assert view.estimated_time == "1h 2m"
 

@@ -1,10 +1,13 @@
+from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
 from gcode_tools import format_print_time, parse_estimated_print_time
-from models import AppState, GcodePreview
+from models import AppState, GcodePreview, MachineConfig
+from models.printer import PrinterModel
 from services.gcode_preview import parse_gcode_preview
+from services.printer_model import load_printer_model
 
 
 class PreviewViewPort(Protocol):
@@ -16,7 +19,9 @@ class PreviewViewPort(Protocol):
 
     def set_estimated_time(self, estimate: str) -> None: ...
 
-    def show_preview(self, preview: GcodePreview) -> None: ...
+    def show_preview(
+        self, preview: GcodePreview, machine_config: MachineConfig
+    ) -> None: ...
 
 
 class PreviewController:
@@ -49,18 +54,28 @@ class PreviewController:
             self.view.set_status(f"Failed to preview G-code: {exc}")
             return
 
-        self.view.show_preview(preview)
-        extrusion_count = sum(len(part.extrusion) for part in preview.parts)
-        travel_count = sum(len(part.travel) for part in preview.parts)
+        self.view.show_preview(preview, self.state.machine_config)
+        visible_steps = [
+            step
+            for step in preview.simulation_steps
+            if step.preview_segment is not None
+        ]
+        counts = Counter(step.kind for step in visible_steps)
+        part_count = len(
+            {step.part_index for step in visible_steps if step.part_index is not None}
+        )
         estimate = parse_estimated_print_time(text)
         if estimate is not None:
             self.view.set_estimated_time(format_print_time(estimate))
         self.view.set_status(
-            f"Preview: {len(preview.parts)} parts, "
-            f"{extrusion_count} extrusion, "
-            f"{travel_count} travel, "
-            f"{len(preview.setup)} setup"
+            f"Preview: {part_count} parts, "
+            f"{counts['extrusion']} extrusion, "
+            f"{counts['travel']} travel, "
+            f"{counts['setup']} setup"
         )
+
+    def load_printer_model(self) -> PrinterModel:
+        return load_printer_model(self.state.machine_config)
 
     def download_gcode(self) -> tuple[str, bytes] | None:
         if self.state.gcode_path is None:
