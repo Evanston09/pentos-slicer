@@ -11,6 +11,14 @@ PENTOS_BLUE = (47, 153, 238)
 PENTOS_ORANGE = (255, 130, 0)
 OVERHANG_RED = (239, 68, 68)
 BUILD_VOLUME_COLOR = (120, 120, 120)
+PART_COLORS = [
+    (47, 153, 238),
+    (255, 130, 0),
+    (34, 197, 94),
+    (236, 72, 153),
+    (168, 85, 247),
+    (20, 184, 166),
+]
 
 
 def logo_to_data_url() -> str:
@@ -51,8 +59,9 @@ def add_build_plate_scene(
     config: MachineConfig,
 ) -> None:
     width, depth, height = config.build_volume_mm
+    client.scene.add_frame("/shared/build_plate", show_axes=False)
     client.scene.add_grid(
-        "/shared/grid",
+        "/shared/build_plate/grid",
         width=width,
         height=depth,
         cell_size=5.0,
@@ -115,7 +124,7 @@ def add_build_plate_scene(
         (7, 4),
     )
     client.scene.add_line_segments(
-        "/shared/build_volume/outline",
+        "/shared/build_plate/build_volume/outline",
         points=np.array(
             [[corners[start], corners[end]] for start, end in edge_indices]
         ),
