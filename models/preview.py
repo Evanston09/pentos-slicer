@@ -1,19 +1,26 @@
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 
 
-@dataclass
-class GcodePreviewPart:
-    travel: np.ndarray
-    extrusion: np.ndarray
-    color: tuple[int, int, int]
+@dataclass(frozen=True)
+class MachinePose:
+    xyz_mm: np.ndarray
+    ab_degrees: np.ndarray
+
+
+@dataclass(frozen=True)
+class PreviewMove:
+    pose: MachinePose
+    preview_segment: np.ndarray | None
+    kind: Literal["setup", "travel", "extrusion", "transition"]
+    part_index: int | None
 
 
 @dataclass
 class GcodePreview:
-    setup: np.ndarray
-    parts: list[GcodePreviewPart]
+    simulation_steps: list[PreviewMove]
     motion_time_seconds: np.ndarray
     a_degrees: np.ndarray
     b_degrees: np.ndarray
