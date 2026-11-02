@@ -2,7 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
-from numpy.testing import assert_array_equal
+from numpy.testing import assert_allclose, assert_array_equal
 
 from models import DEFAULT_MACHINE_CONFIG, GcodePreview
 from services.gcode_preview import parse_gcode_preview
@@ -147,7 +147,12 @@ def test_simulation_loads_once_and_scrubs_prepared_paths(monkeypatch) -> None:
                 for s in preview.simulation_steps[: index + 1]
                 if s.preview_segment is not None and s.kind in kinds
             ]
-            assert_array_equal(handle.points, np.asarray(expected).reshape(-1, 2, 3))
+            assert_allclose(
+                handle.points,
+                np.asarray(expected).reshape(-1, 2, 3),
+                rtol=1e-7,
+                atol=1e-6,
+            )
         for toolpath, (old_points, old_colors) in zip(view.toolpaths, prepared):
             assert toolpath.points is old_points
             assert toolpath.colors is old_colors

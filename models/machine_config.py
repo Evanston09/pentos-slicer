@@ -6,7 +6,7 @@ class MachineConfig:
     name: str = "Default Pentos"
     build_volume_mm: tuple[float, float, float] = (90.0, 90.0, 90.0)
     machine_plate_center_mm: tuple[float, float, float] = (113.0, 52.0, 0.0)
-    rotation_center_machine_mm: tuple[float, float, float] = (112.0, 51.0, 2.0)
+    rotation_center_machine_mm: tuple[float, float, float] = (111.4161, 52.1880, 4.5732)
     a_max_velocity_deg_s: float = 10.0
     a_max_acceleration_deg_s2: float = 50.0
     b_max_velocity_deg_s: float = 20.0
