@@ -85,6 +85,35 @@ def test_guide_deformation_maps_guides_to_flat_heights() -> None:
     )
 
 
+def test_flat_bottom_stays_exactly_planar_with_inclined_curved_upper_guides() -> None:
+    mesh = trimesh.creation.box(extents=[30.0, 30.0, 8.0])
+    mesh.apply_translation([0.0, 0.0, 4.0])
+    mesh = mesh.subdivide().subdivide()
+    x, y, z = mesh.vertices.T.copy()
+    mesh.vertices[:, 2] = z / 8.0 * (8.0 + 0.15 * x + 0.002 * x**2 - 0.002 * y**2)
+    volume = tetrahedralize(mesh)
+    bottom = volume.original_vertices[:, 2] == 0.0
+    surfaces = [guide(0, [0.0, 0.0, 0.0]), guide(1, [0.0, 0.0, 1.0])]
+    for index, fraction in enumerate((0.25, 0.5, 0.75, 1.0), 2):
+        surface = guide(
+            index,
+            [0.0, 0.0, 1.0 + 7.0 * fraction],
+            bend_x=0.002 * fraction,
+            bend_y=-0.002 * fraction,
+        )
+        surface.heights_mm += 0.15 * fraction * surface.control_xy[0][None, :]
+        surfaces.append(surface)
+
+    solve_guide_deformation(volume, surfaces)
+
+    assert_allclose(volume.scalar_values[bottom], 0.0, atol=1e-12)
+    assert_allclose(volume.deformed_vertices[bottom, 2], 0.0, atol=1e-12)
+    assert volume.deformed_vertices[:, 2].min() >= 0.0
+    assert np.all(
+        _tetrahedron_determinants(volume.deformed_vertices, volume.tetrahedra) > 0.0
+    )
+
+
 def test_curved_guides_produce_an_injective_scalar_flattening() -> None:
     volume = tetrahedralize(trimesh.creation.box(extents=[2.0, 2.0, 1.0]))
     guides = [

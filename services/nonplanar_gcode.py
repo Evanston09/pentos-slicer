@@ -49,8 +49,9 @@ def _ab_angles(
         if horizontal <= tolerance
         else np.degrees(np.arcsin(tolerance / horizontal))
     )
-    min_turn = math.ceil((machine_config.b_degrees_min - target_b) / 180.0)
-    max_turn = math.floor((machine_config.b_degrees_max - target_b) / 180.0)
+    # A pose just beyond a B limit can still have a legal error-tolerant interval.
+    min_turn = math.ceil((machine_config.b_degrees_min - target_b - width) / 180.0)
+    max_turn = math.floor((machine_config.b_degrees_max - target_b + width) / 180.0)
     turn = min(max(round((previous_b - target_b) / 180.0), min_turn), max_turn)
     center = target_b + 180.0 * turn
     b_degrees = float(
@@ -113,9 +114,10 @@ def _smooth_angles(
     source_normals: np.ndarray,
     segment_durations: np.ndarray,
     machine_config: MachineConfig,
+    previous_b: float = 0.0,
 ) -> np.ndarray:
-    """Time-domain smooth A/B commands without exceeding normal-error limits."""
-    if len(angles) < 2:
+    """Smooth poses and minimize B motion within the source-normal error limit."""
+    if len(angles) == 0:
         return angles.copy()
 
     # Filter across the B wrap instead of treating -180 and 180 as far apart.
@@ -161,6 +163,33 @@ def _smooth_angles(
         machine_config.b_degrees_min,
         machine_config.b_degrees_max,
     )
+
+    # Minimize B motion while keeping the final pose within the normal-error limit.
+    for index, (source, candidate) in enumerate(zip(source_normals, smoothed)):
+        center_a, b_degrees = _ab_angles(
+            source,
+            previous_b,
+            machine_config,
+            machine_config.max_normal_error_degrees,
+        )
+        b = math.radians(b_degrees)
+        preferred = _commanded_normal(candidate)
+        preferred_a = math.degrees(
+            math.atan2(
+                -(preferred[0] * math.cos(b) + preferred[1] * math.sin(b)),
+                preferred[2],
+            )
+        )
+        horizontal = -(source[0] * math.cos(b) + source[1] * math.sin(b))
+        projection_length = math.hypot(horizontal, source[2])
+        width_a = math.degrees(
+            math.acos(minimum_dot / max(projection_length, minimum_dot))
+        )
+        smoothed[index] = [
+            np.clip(preferred_a, center_a - width_a, center_a + width_a),
+            b_degrees,
+        ]
+        previous_b = b_degrees
     return smoothed
 
 
@@ -244,6 +273,7 @@ def _prepare_mapped_moves(
     previous_b = 0.0
     mapping_error = machine_config.max_normal_error_degrees / 2.0
     for group in groups:
+        incoming_b = previous_b
         source_normals = np.asarray(
             [prepared[index].normals[segment] for index, segment in group]
         )
@@ -255,7 +285,7 @@ def _prepare_mapped_moves(
             angles.append(angle)
             previous_b = angle[1]
         angles = _smooth_angles(
-            np.asarray(angles), source_normals, durations, machine_config
+            np.asarray(angles), source_normals, durations, machine_config, incoming_b
         )
         previous_b = float(angles[-1, 1])
         for (index, segment), angle in zip(group, angles):

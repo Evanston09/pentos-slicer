@@ -118,11 +118,152 @@ def test_smooth_angles_handles_b_wrap() -> None:
         source_normals,
         np.full(len(angles), 0.01),
         DEFAULT_MACHINE_CONFIG,
+        previous_b=179.0,
     )
 
     assert np.all(np.abs(smoothed[:, 1]) > 170.0)
     assert np.all(smoothed[:, 1] >= DEFAULT_MACHINE_CONFIG.b_degrees_min)
     assert np.all(smoothed[:, 1] <= DEFAULT_MACHINE_CONFIG.b_degrees_max)
+
+
+def test_smooth_angles_holds_b_near_flat_before_real_tilt() -> None:
+    source_angles = np.array([[1.5, 75.0], [1.5, -75.0], [20.0, 75.0]])
+    source_normals = np.asarray([_commanded_normal(angle) for angle in source_angles])
+    angles = []
+    previous_b = 0.0
+    for normal in source_normals:
+        angle = _ab_angles(normal, previous_b, DEFAULT_MACHINE_CONFIG, 1.0)
+        angles.append(angle)
+        previous_b = angle[1]
+
+    smoothed = _smooth_angles(
+        np.asarray(angles),
+        source_normals,
+        np.full(len(angles), 0.01),
+        DEFAULT_MACHINE_CONFIG,
+    )
+
+    assert_allclose(smoothed[:2, 1], 0.0, atol=1e-10)
+    assert abs(smoothed[2, 1]) > 60.0
+    commanded = np.asarray([_commanded_normal(angle) for angle in smoothed])
+    errors = np.degrees(
+        np.arccos(np.clip(np.sum(source_normals * commanded, axis=1), -1.0, 1.0))
+    )
+    assert np.all(errors <= DEFAULT_MACHINE_CONFIG.max_normal_error_degrees + 1e-6)
+
+
+def test_smooth_angles_leaves_flat_region_without_a_large_b_jump() -> None:
+    source_angles = np.array([[1.5, 90.0], [2.01, 90.0]])
+    source_normals = np.asarray([_commanded_normal(angle) for angle in source_angles])
+    angles = []
+    previous_b = 0.0
+    for normal in source_normals:
+        angle = _ab_angles(normal, previous_b, DEFAULT_MACHINE_CONFIG, 1.0)
+        angles.append(angle)
+        previous_b = angle[1]
+
+    smoothed = _smooth_angles(
+        np.asarray(angles), source_normals, np.full(2, 0.01), DEFAULT_MACHINE_CONFIG
+    )
+
+    assert_allclose(smoothed[0, 1], 0.0, atol=1e-10)
+    assert 0.0 < smoothed[1, 1] < 6.0
+    for normal, angle in zip(source_normals, smoothed):
+        error = np.degrees(
+            np.arccos(np.clip(np.dot(normal, _commanded_normal(angle)), -1.0, 1.0))
+        )
+        assert error <= DEFAULT_MACHINE_CONFIG.max_normal_error_degrees + 1e-6
+
+
+def test_map_gcode_holds_b_for_changing_near_flat_normals() -> None:
+    source_angles = np.column_stack((np.full(5, 1.5), [60, 75, 90, 105, 120]))
+    source_normals = np.asarray([_commanded_normal(angle) for angle in source_angles])
+
+    class NearFlatVolume:
+        @staticmethod
+        def inverse_map_properties(points):
+            return points, np.ones(len(points)), source_normals
+
+    offset = np.asarray(DEFAULT_MACHINE_CONFIG.machine_offset)
+    start = offset + [0.0, 0.1, 0.1]
+    end = offset + [0.5, 0.1, 0.1]
+    text = (
+        "G90\nM83\n"
+        f"G1 X{start[0]} Y{start[1]} Z{start[2]} F600\n"
+        + ";LAYER_CHANGE\n" * 6
+        + f"G1 X{end[0]} Y{end[1]} Z{end[2]} E0.5\n"
+    )
+
+    mapped = map_gcode_to_original(text, NearFlatVolume(), DEFAULT_MACHINE_CONFIG, 0.1)
+    moves = _mapped_ab_moves(mapped)
+    assert_allclose([move.end_ab[1] for move in moves], 0.0, atol=1e-10)
+    center = np.asarray(DEFAULT_MACHINE_CONFIG.rotation_center_local_mm)
+    for index, move in enumerate(moves):
+        point = np.array([(index + 1) / 10.0, 0.1, 0.1])
+        expected = offset + center + rotation_matrix(*move.end_ab) @ (point - center)
+        assert_allclose(move.end_xyz, expected, atol=1e-5)
+        error = np.degrees(
+            np.arccos(
+                np.clip(
+                    np.dot(source_normals[index], _commanded_normal(move.end_ab)), -1, 1
+                )
+            )
+        )
+        assert error <= DEFAULT_MACHINE_CONFIG.max_normal_error_degrees + 1e-4
+
+
+def test_smooth_angles_holds_nonzero_incoming_b_for_single_pose() -> None:
+    angles = np.array([[1.5, 135.0]])
+    source_normals = np.asarray([_commanded_normal(angles[0])])
+
+    smoothed = _smooth_angles(
+        angles,
+        source_normals,
+        np.array([0.01]),
+        DEFAULT_MACHINE_CONFIG,
+        previous_b=45.0,
+    )
+
+    assert_allclose(smoothed[0], [0.0, 45.0], atol=1e-10)
+
+
+def test_smooth_angles_can_hold_b_at_maximum_normal_error() -> None:
+    config = replace(DEFAULT_MACHINE_CONFIG, max_normal_error_degrees=90.0)
+    source_normals = np.array([[0.0, -1.0, 0.0]])
+
+    smoothed = _smooth_angles(
+        np.array([[90.0, 90.0]]), source_normals, np.array([0.01]), config
+    )
+
+    assert_allclose(smoothed, [[0.0, 0.0]], atol=1e-10)
+
+
+def test_map_gcode_holds_last_emitted_b_across_mapping_gap() -> None:
+    class InterruptedVolume:
+        @staticmethod
+        def inverse_map_properties(points):
+            if np.any((points[:, 0] > 0.25) & (points[:, 0] < 0.9)):
+                raise ValueError("Outside volume")
+            angles = [20.0, 60.0] if points[0, 0] < 0.9 else [1.5, -90.0]
+            normals = np.tile(_commanded_normal(np.asarray(angles)), (len(points), 1))
+            return points, np.ones(len(points)), normals
+
+    offset = np.asarray(DEFAULT_MACHINE_CONFIG.machine_offset)
+    text = (
+        "G90\nM83\n"
+        f"G1 X{offset[0]} Y{offset[1]} Z{offset[2]} F600\n"
+        + ";LAYER_CHANGE\n" * 6
+        + f"G1 X{offset[0] + 0.25} E0.1\n"
+        + f"G1 X{offset[0] + 0.75}\n"
+        + f"G1 X{offset[0] + 1.0} E0.1\n"
+    )
+
+    moves = _mapped_ab_moves(
+        map_gcode_to_original(text, InterruptedVolume(), DEFAULT_MACHINE_CONFIG)
+    )
+
+    assert abs(moves[0].end_ab[1]) > 50.0
+    assert_allclose([move.end_ab[1] for move in moves], moves[0].end_ab[1])
 
 
 def test_smooth_normals_is_segmentation_invariant() -> None:

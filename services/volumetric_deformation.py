@@ -410,6 +410,28 @@ def solve_guide_scalar_field(
             targets * constraint_weight,
         )
     )
+
+    # Pin the flat bottom when the first guide matches and covers it,
+    # preventing solver error from lifting parts of the first-layer footprint.
+    vertices = volume.original_vertices
+    bottom = np.isclose(vertices[:, 2], vertices[:, 2].min(), rtol=0.0, atol=1e-8)
+    first_guide = guides[0]
+    bottom_local = (vertices[bottom] - first_guide.position) @ first_guide.rotation
+    fixed = np.zeros(len(vertices), dtype=bool)
+    if (
+        np.any(np.all(bottom[volume.boundary_faces], axis=1))
+        and np.ptp(first_guide.heights_mm) < 1e-8
+        and np.all(np.abs(first_guide.rotation[:2, 2]) < 1e-8)
+        and np.all(np.abs(first_guide.signed_height(vertices[bottom])) < 1e-8)
+        and np.all(np.abs(bottom_local[:, :2]) <= first_guide.size_mm / 2.0 + 1e-8)
+    ):
+        fixed = bottom
+    free = ~fixed
+    right_hand_side -= (
+        np.asarray(system[:, fixed].sum(axis=1)).ravel() * guide_heights[0]
+    )
+    system = system[:, free]
+
     column_scale = 1.0 / np.sqrt(np.asarray(system.power(2).sum(axis=0)).ravel())
     solution = lsqr(
         system.multiply(column_scale).tocsr(),
@@ -422,7 +444,8 @@ def solve_guide_scalar_field(
         raise ValueError(
             "Guide field solve did not converge; simplify guides or refine the mesh"
         )
-    scalar_values = solution[0] * column_scale
+    scalar_values = np.full(len(vertices), guide_heights[0])
+    scalar_values[free] = solution[0] * column_scale
     residuals = constraints @ scalar_values - targets
     reports = []
     for guide, height in zip(guides, guide_heights):

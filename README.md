@@ -103,6 +103,10 @@ then inverse-maps them through the deformation. The mapper compensates XYZ for
 the bed pivot, adjusts extrusion and feed rate, and smooths A/B orientation
 within the configured normal-error limit.
 
+Pose selection holds the previous B angle whenever the layer normal can be
+matched within that error limit, including near-flat layers. When B must change,
+it chooses the nearest permitted angle and compensates XYZ for the resulting pose.
+
 The field solver blends local curved-guide normals near each tetrahedron. Guide
 list order defines increasing layer values; adjacent intervals use the mean
 normal separation of the surfaces, weighted by model volume, rather than the
@@ -110,6 +114,10 @@ distance between guide origins. Adjacent guide footprints must overlap at sample
 model locations; enlarge the patches or refine the input mesh if they do not.
 Detected touching, crossing, or reversed ordering at those samples stops the solve.
 These samples do not establish that guides are disjoint everywhere.
+
+A horizontal first guide that coincides with and covers the model's entire flat
+bottom holds that bottom exactly planar during deformation, preserving the full
+first-layer footprint.
 
 Generated G-code includes a comment reporting RMS and maximum guide fit error in
 **flattened millimeters**, measured at guide/volume-edge intersections. It measures
