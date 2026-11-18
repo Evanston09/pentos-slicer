@@ -140,13 +140,15 @@ PrusaSlicer's Creality profile (including its inherited cooling settings); adjus
 these starting values for your filament and machine. **Reset to Filament Preset**
 restores the selected material's values.
 
-**Print Settings** controls layer height, first-layer height, perimeter count, and
-infill percentage. The baseline 0.4 mm nozzle supports heights from 0.06 to 0.32 mm.
+**Print Settings** controls layer height, first-layer height, perimeter count,
+infill percentage, and **Generate Supports**. Supports are available in Multiplanar
+mode; remove all cutting planes for a conventional supported print with Pentos's
+machine-coordinate translation. The baseline 0.4 mm nozzle supports heights from 0.06 to 0.32 mm.
 At 100% infill, Pentos uses rectilinear instead of the baseline grid pattern.
 Speeds retain their baseline values. **Reset Print Settings** restores print
 defaults without changing the filament selection.
 
-Only the material, four temperatures, and four print settings are remembered in
+The material, four temperatures, and print settings are remembered in
 browser storage and included in exported `.pentos` projects. Material-specific
 constants are applied during slicing; fixed settings remain in `pentos_config.ini`.
 Loading a project restores its values. Settings edits require slicing

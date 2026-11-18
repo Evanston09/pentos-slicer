@@ -134,6 +134,16 @@ class SlicingSettingsView:
                     )
                     self.buttons.append(button)
                 elif title == "Print Settings":
+                    supports = client.gui.add_checkbox(
+                        "Generate Supports",
+                        initial_value=settings.print.support_material,
+                    )
+                    self.inputs["print", "support_material"] = supports
+                    self._bind_input(supports, "print", "support_material", bool)
+                    client.gui.add_markdown(
+                        "Supports use Multiplanar mode. For a flat supported print, "
+                        "remove all cutting planes."
+                    )
                     button = client.gui.add_button("Reset Print Settings")
                     button.on_click(
                         lambda _: (

@@ -47,7 +47,10 @@ def write_slicing_config(
         **groups["filament"],
         **groups["print"],
     }
-    replacements = {key: str(value) for key, value in values.items()}
+    replacements = {
+        key: str(int(value)) if isinstance(value, bool) else str(value)
+        for key, value in values.items()
+    }
     replacements["fill_density"] += "%"
     profile = f"Generic {material} @CREALITY"
     replacements["default_filament_profile"] = f'"{profile}"'

@@ -28,9 +28,12 @@ class PrintSettings:
     perimeters: int = 3
     # Named fill_density to match PrusaSlicer's setting name. (it's just infill)
     fill_density: float = 15.0
+    support_material: bool = False
 
     def __post_init__(self) -> None:
-        _validate_numbers(self)
+        _validate_numbers(self, skip=("support_material",))
+        if type(self.support_material) is not bool:
+            raise ValueError("Support material must be enabled or disabled")
         # Supported layer-height range of the baseline 0.4 mm nozzle profile.
         for name in ("layer_height", "first_layer_height"):
             if not 0.06 <= getattr(self, name) <= 0.32:

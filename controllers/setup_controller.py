@@ -363,6 +363,9 @@ class SetupController:
 
         mesh, source_name = model
         settings = self.state.slicing_settings
+        if self.state.slicing_mode == "nonplanar" and settings.print.support_material:
+            self.view.set_status("Generate Supports is available in Multiplanar mode")
+            return
         self.is_slicing = True
         self.view.set_slice_enabled(False)
         self.view.set_slice_progress(0.0, "Preparing slice...")

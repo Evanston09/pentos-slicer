@@ -86,6 +86,19 @@ def test_solid_infill_uses_supported_pattern(tmp_path) -> None:
     assert config_values(generated)["fill_pattern"] == "rectilinear"
 
 
+def test_supports_round_trip_and_per_slice_config(tmp_path) -> None:
+    settings = SlicingSettings(print=PrintSettings(support_material=True))
+    restored = load_slicing_settings(save_slicing_settings(settings))
+    assert restored == settings
+    enabled = write_slicing_config(restored, tmp_path / "enabled.ini")
+    disabled = write_slicing_config(SlicingSettings(), tmp_path / "disabled.ini")
+    assert config_values(enabled.read_text())["support_material"] == "1"
+    assert config_values(disabled.read_text())["support_material"] == "0"
+    legacy = settings.as_dict()
+    del legacy["print"]["support_material"]
+    assert SlicingSettings.from_dict(legacy).print.support_material is False
+
+
 @pytest.mark.parametrize(
     "changes",
     [
@@ -111,6 +124,8 @@ def test_invalid_filament_settings(changes) -> None:
         {"fill_density": 101},
         {"fill_density": float("nan")},
         {"layer_height": float("inf")},
+        {"support_material": 1},
+        {"support_material": "false"},
     ],
 )
 def test_invalid_print_settings(changes) -> None:
@@ -133,6 +148,7 @@ def test_settings_json_round_trip() -> None:
             "first_layer_height": 0.2,
             "perimeters": 3,
             "fill_density": 15.0,
+            "support_material": False,
         },
     }
     assert load_slicing_settings(save_slicing_settings(settings)) == settings

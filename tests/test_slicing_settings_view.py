@@ -53,6 +53,7 @@ class Gui:
     add_text = add_number
     add_button = add_number
     add_markdown = add_number
+    add_checkbox = add_number
 
 
 def test_presets_edits_reset_and_lifecycle() -> None:
@@ -65,7 +66,7 @@ def test_presets_edits_reset_and_lifecycle() -> None:
 
     view = SlicingSettingsView(SimpleNamespace(gui=gui), SlicingSettings(), apply)
     assert changed == []
-    assert len(view.inputs) == 8
+    assert len(view.inputs) == 9
     assert len(view.folders) == 2
     assert "Speeds" not in gui.handles
     gui.handles["Material"].value = "PETG"
@@ -74,11 +75,15 @@ def test_presets_edits_reset_and_lifecycle() -> None:
     assert changed[-1].filament.temperature == 245
     assert gui.handles["Material"].value == "PETG"
     gui.handles["Infill (%)"].value = 30.0
+    gui.handles["Generate Supports"].value = True
+    assert view.settings.print.support_material is True
     gui.handles["Reset to Filament Preset"].callback(None)
     assert view.settings.filament == filament_preset("PETG")
     assert view.settings.print.fill_density == 30
+    assert view.settings.print.support_material is True
     gui.handles["Reset Print Settings"].callback(None)
     assert view.settings.print == SlicingSettings().print
+    assert gui.handles["Generate Supports"].value is False
     previous = view.settings
     gui.handles["Nozzle (°C)"].value = 0
     assert view.settings == previous

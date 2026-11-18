@@ -15,7 +15,7 @@ from models import AppState, GuideSurfaceSnapshot, MachineConfig
 from services.machine_config_io import save_machine_config
 from services.model_tools import transformed_model
 from services.project_io import load_scene, save_scene
-from models import SlicingSettings
+from models import PrintSettings, SlicingSettings
 from models.slicing_settings import filament_preset
 
 
@@ -520,6 +520,22 @@ def test_settings_snapshot_is_used_and_edits_are_ignored_during_slice(tmp_path) 
     controller.slice_model()
     assert state.slicing_settings == settings
     assert state.gcode_path is not None
+    assert not controller.is_slicing
+
+
+def test_nonplanar_supports_are_rejected_before_slicing() -> None:
+    state = AppState(
+        current_model=(trimesh.creation.box(), "model"),
+        slicing_mode="nonplanar",
+        slicing_settings=SlicingSettings(print=PrintSettings(support_material=True)),
+    )
+    controller, view, slicer, navigations = make_controller(state)
+
+    controller.slice_model()
+
+    assert view.statuses[-1] == "Generate Supports is available in Multiplanar mode"
+    assert slicer.calls == []
+    assert navigations == []
     assert not controller.is_slicing
 
 
