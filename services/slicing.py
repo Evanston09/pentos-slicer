@@ -1,3 +1,4 @@
+import math
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -248,11 +249,12 @@ class Slicer:
         pieces = decompose_mesh(mesh, planes, cap=True)
 
         chunks = []
+        ab = (0.0, 0.0)
         for index, piece in enumerate(pieces):
             path = self.temp_dir / f"{source_name}_{mesh.identifier_hash}_{index}.stl"
-            oriented, z_offset, flat_xy_offset, a_degrees, b_degrees = self._orient(
-                piece.mesh,
-                piece.print_up_normal,
+            ab = self._select_ab_angles(piece.print_up_normal, ab)
+            oriented, z_offset, flat_xy_offset = self._orient(
+                piece.mesh, piece.print_up_normal, ab
             )
             oriented.export(path)
             chunks.append(
@@ -261,22 +263,24 @@ class Slicer:
                     print_up_normal=piece.print_up_normal,
                     z_offset=z_offset,
                     flat_xy_offset=flat_xy_offset,
-                    a_degrees=a_degrees,
-                    b_degrees=b_degrees,
+                    a_degrees=ab[0],
+                    b_degrees=ab[1],
                 )
             )
 
         return chunks
 
     def _orient(
-        self, mesh: trimesh.Trimesh, print_up_normal: np.ndarray | None
-    ) -> tuple[trimesh.Trimesh, float, list[float], float, float]:
-        a_degrees, b_degrees = self.ab_angles(print_up_normal)
+        self,
+        mesh: trimesh.Trimesh,
+        print_up_normal: np.ndarray | None,
+        ab: tuple[float, float],
+    ) -> tuple[trimesh.Trimesh, float, list[float]]:
         flat_xy_offset = [0.0, 0.0]
 
         if print_up_normal is not None:
             transform = np.eye(4)
-            transform[:3, :3] = rotation_matrix(a_degrees, b_degrees)
+            transform[:3, :3] = rotation_matrix(*ab)
             transform = trimesh.transformations.transform_around(
                 transform,
                 np.asarray(self.machine_config.rotation_center_local_mm),
@@ -294,7 +298,40 @@ class Slicer:
             ]
             mesh.apply_translation([flat_xy_offset[0], flat_xy_offset[1], 0.0])
 
-        return mesh, z_offset, flat_xy_offset, a_degrees, b_degrees
+        return mesh, z_offset, flat_xy_offset
+
+    def _select_ab_angles(
+        self,
+        print_up_normal: np.ndarray | None,
+        previous_ab: tuple[float, float],
+    ) -> tuple[float, float]:
+        if print_up_normal is None:
+            return 0.0, 0.0
+
+        a, b = self.ab_angles(print_up_normal)
+        config = self.machine_config
+        if np.isclose(np.sin(np.radians(a)), 0.0):
+            b = float(
+                np.clip(previous_ab[1], config.b_degrees_min, config.b_degrees_max)
+            )
+            candidates = [(a, b), (-a, b)]
+        else:
+            # Every half-turn of B reverses A while aligning the same normal.
+            first = math.ceil((config.b_degrees_min - b) / 180.0)
+            last = math.floor((config.b_degrees_max - b) / 180.0)
+            candidates = [
+                (a if turn % 2 == 0 else -a, b + 180.0 * turn)
+                for turn in range(first, last + 1)
+            ]
+        if not candidates:
+            raise ValueError("Chunk orientation cannot be reached within the B limits")
+
+        def motion_time(pose: tuple[float, float]) -> tuple[float, float]:
+            a_time = abs(pose[0] - previous_ab[0]) / config.a_max_velocity_deg_s
+            b_time = abs(pose[1] - previous_ab[1]) / config.b_max_velocity_deg_s
+            return max(a_time, b_time), a_time + b_time
+
+        return min(candidates, key=motion_time)
 
     @staticmethod
     def ab_angles(print_up_normal: np.ndarray | None) -> tuple[float, float]:
